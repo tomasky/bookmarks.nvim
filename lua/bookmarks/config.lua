@@ -1,13 +1,26 @@
 local M = {}
 M.config = {}
 
-M.schema = {}
+M.schema = {
+   save_file = {
+      type = "string",
+      default = vim.fn.expand "~/.bookmarks",
+   },
+   signs = {
+      type = "table",
+      deep_extend = true,
+      default = {
+         add = { hl = "BookMarksAdd", text = "⚑", numhl = "BookMarksAddNr", linehl = "BookMarksAddLn" },
+         ann = { hl = "BookMarksAnn", text = "♥", numhl = "BookMarksAnnNr", linehl = "BookMarksAnnLn" },
+      },
+   },
+}
 
 local function validate_config(config)
    for k, v in pairs(config) do
       local kschema = M.schema[k]
       if kschema == nil then
-         warn("gitsigns: Ignoring invalid configuration field '%s'", k)
+         warn("bookmarks: Ignoring invalid configuration field '%s'", k)
       elseif kschema.type then
          if type(kschema.type) == "string" then
             vim.validate {

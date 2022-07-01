@@ -68,4 +68,16 @@ function M:reset()
    end
 end
 
+local signs
+
+M.setup = function()
+   signs = M.new(config.signs)
+end
+
+M.detach = function(bufnr, keep_signs)
+   if not keep_signs then
+      signs:remove(bufnr)
+   end
+end
+
 return M

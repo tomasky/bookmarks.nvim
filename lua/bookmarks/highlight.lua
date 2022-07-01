@@ -5,6 +5,7 @@ local M = {}
 
 local hls = {
    { BookMarksAdd = { "MarkAdd" } },
+   { BookMarksAnn = { "MarkAnn" } },
 }
 
 local function is_hl_set(hl_name)

@@ -35,13 +35,13 @@ Here is an example with most of the default settings:
 
 ```lua
 require('bookmarks').setup {
-
+  save_file = "~/.bookmarks"
 }
 ```
 
 ## Credits
 
-- [gitsigns.nvim] most lua functions come from this plugin
+- [gitsigns.nvim] most of lua functions come from this plugin
 - [vim-bookmarks](https://github.com/MattesGroeger/vim-bookmarks) inspired by this vim plugin
 
 [gitsigns.nvim]: https://github.com/lewis6991/gitsigns.nvim
