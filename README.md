@@ -35,7 +35,14 @@ Here is an example with most of the default settings:
 
 ```lua
 require('bookmarks').setup {
-  save_file = "~/.bookmarks"
+  save_file = "$HOME/.bookmarks",
+  on_attach = function(bufnr)
+    local bm = require "bookmarks"
+    local map = vim.keymap.set
+    map("n","mm",bm.bookmark_toggle)
+    map("n","mc",bm.bookmark_clean)
+    map("n","mi",bm.bookmark_ann)
+  end
 }
 ```
 

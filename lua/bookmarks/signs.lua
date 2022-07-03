@@ -27,9 +27,10 @@ end
 
 function M:add(bufnr, signs)
    local cfg = self.config
-
+   local isExt = true
    for _, s in ipairs(signs) do
       if not self:contains(bufnr, s.lnum) then
+         isExt = false
          local cs = cfg[s.type]
          local text = cs.text
 
@@ -43,28 +44,17 @@ function M:add(bufnr, signs)
          })
       end
    end
+   return isExt
 end
 
 function M:contains(bufnr, start)
    local marks = api.nvim_buf_get_extmarks(bufnr, self.ns, { start - 1, 0 }, { start, 0 }, { limit = 1 })
-   return #marks > 0
+   return marks and #marks > 0
 end
 
 function M:reset()
    for _, buf in ipairs(api.nvim_list_bufs()) do
       self:remove(buf)
-   end
-end
-
-local signs
-
-M.setup = function()
-   signs = M.new(config.signs)
-end
-
-M.detach = function(bufnr, keep_signs)
-   if not keep_signs then
-      signs:remove(bufnr)
    end
 end
 

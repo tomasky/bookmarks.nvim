@@ -29,27 +29,51 @@ local function autocmd(event, opts)
    nvim.autocmd(event, opts0)
 end
 
-M.attach = void(function(bufnr, aucmd)
+local function on_detach(_, bufnr)
+   M.detach(bufnr, true)
+end
+
+M.attach = void(function(bufnr)
+   bufnr = bufnr or current_buf()
    scheduler()
    actions.loadBookmarks()
-   if config.on_attach then
-      config.on_attach(bufnr)
+   if config.config.on_attach then
+      config.config.on_attach(bufnr)
    end
+   api.nvim_buf_attach(bufnr, false, {
+      on_detach = on_detach,
+   })
 end)
 
 M.detach_all = void(function(bufnr)
+   bufnr = bufnr or current_buf()
    scheduler()
-   signs.detach(bufnr)
+   actions.detach(bufnr)
    actions.saveBookmarks()
 end)
 
+local function on_or_after_vimenter(fn)
+   if vim.v.vim_did_enter == 1 then
+      fn()
+   else
+      nvim.autocmd("VimEnter", {
+         callback = wrap_func(fn),
+         once = true,
+      })
+   end
+end
+
 M.setup = void(function(cfg)
    config.build(cfg)
-   signs.setup()
+   actions.setup()
    nvim.augroup "bookmarks"
    autocmd("VimLeavePre", M.detach_all)
    autocmd("ColorScheme", hl.setup_highlights)
-   autocmd("BufRead", wrap_func(M.attach, nil, "BufRead"))
+   on_or_after_vimenter(function()
+      hl.setup_highlights()
+      M.attach()
+      autocmd("BufWinEnter", actions.refresh)
+   end)
 end)
 
 return setmetatable(M, {
