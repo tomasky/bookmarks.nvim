@@ -90,21 +90,23 @@ function M.emptytable()
    })
 end
 
-function M.readfile(filename)
-   local data, ok
-   local fh, err, code = io.popen(filename, "r")
-   if fh then
-      data, err, code = fh:read "*a"
-      if data then
-         ok, err, code = fh:close()
-      else
-         fh:close()
-      end
+function M.clear_prompt()
+   vim.api.nvim_command "normal! :"
+end
+
+function M.prompt_yes_no(prompt, callback, prompt_no_cr)
+   prompt = string.format("%s [y/N] ", prompt)
+   if prompt_no_cr then -- use getchar so no <cr> is required
+      print(prompt)
+      local ans = vim.fn.nr2char(vim.fn.getchar())
+      local is_confirmed = ans:lower():match "^y"
+      M.clear_prompt()
+      callback(is_confirmed)
+   else -- use vim.ui.input
+      vim.ui.input({ prompt = prompt }, function(answer)
+         callback(vim.tbl_contains({ "y", "yes" }, answer and answer:lower()))
+      end)
    end
-   if not ok then
-      return err .. code
-   end
-   return data:gsub("\r", "")
 end
 
 M.write_file = function(path, content)
@@ -147,6 +149,25 @@ function M.dump(o)
       return s .. "} "
    else
       return tostring(o)
+   end
+end
+
+function M.warn(...)
+   vim.notify(string.format(...), vim.log.levels.WARN)
+end
+
+function M.error(...)
+   vim.notify(string.format(...), vim.log.levels.ERROR)
+end
+
+function M.lazy(fn)
+   local cached
+   return function(...)
+      if cached == nil then
+         cached = fn(...)
+         assert(cached ~= nil, "lazy: fn returned nil")
+      end
+      return cached
    end
 end
 

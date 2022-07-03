@@ -2,9 +2,34 @@ local M = {}
 M.config = {}
 
 M.schema = {
+   cache = {
+      type = "table",
+      deep_extend = true,
+      default = {},
+   },
    save_file = {
       type = "string",
-      default = vim.fn.expand "~/.bookmarks",
+      default = vim.fn.expand "$HOME/.bookmarks",
+   },
+   sign_priority = {
+      type = "number",
+      default = 6,
+   },
+   signcolumn = {
+      type = "boolean",
+      default = true,
+   },
+   numhl = {
+      type = "boolean",
+      default = false,
+   },
+   linehl = {
+      type = "boolean",
+      default = false,
+   },
+   on_attach = {
+      type = "function",
+      default = nil,
    },
    signs = {
       type = "table",

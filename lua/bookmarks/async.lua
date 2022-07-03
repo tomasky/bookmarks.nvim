@@ -1,7 +1,5 @@
 local co = coroutine
 
-local Async = {}
-
 local async_thread = {
    threads = {},
 }
