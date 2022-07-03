@@ -16,7 +16,7 @@ M.detach = function(bufnr, keep_signs)
    end
 end
 
-local function updateBookmarks(bufnr, line, mark, ann)
+local function updateBookmarks(bufnr, lnum, mark, ann)
    local filepath = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
    if filepath == nil then
       return
@@ -24,23 +24,23 @@ local function updateBookmarks(bufnr, line, mark, ann)
    local data = config.cache["data"]
    local marks = data[filepath]
    local isIns = false
-   if line == -1 then
+   if lnum == -1 then
       marks = nil
       isIns = true
       -- check buffer auto_save to file
    end
-   for i = 1, #(marks or {}) do
-      if marks[i].l == line then
+   for k, _ in pairs(marks or {}) do
+      if k == tostring(lnum) then
          isIns = true
          if mark == "" then
-            table.remove(marks, i)
+            marks[k] = nil
          end
          break
       end
    end
    if isIns == false then
       marks = marks or {}
-      table.insert(marks, ann and { l = line, m = mark, a = ann } or { l = line, m = mark })
+      marks[tostring(lnum)] = ann and { m = mark, a = ann } or { m = mark }
       -- check buffer auto_save to file
       -- M.saveBookmarks()
    end
@@ -80,6 +80,13 @@ M.bookmark_clean = function()
    updateBookmarks(bufnr, -1, "")
 end
 
+M.bookmark_line = function(lnum, bufnr)
+   bufnr = bufnr or current_buf()
+   local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
+   local marks = config.cache["data"][file]
+   return marks[lnum]
+end
+
 M.bookmark_ann = function()
    local lnum = api.nvim_win_get_cursor(0)[1]
    local bufnr = current_buf()
@@ -89,14 +96,21 @@ M.bookmark_ann = function()
    } }
    local isExt = signs:add(bufnr, signlines)
    local input_msg = isExt and "Edit:" or "Enter:"
-   vim.ui.input({ prompt = input_msg, default = "" }, function(answer)
+   local mark = M.bookmark_line(lnum, bufnr)
+   vim.ui.input({ prompt = input_msg, default = mark.a }, function(answer)
       local line = api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1]
       updateBookmarks(bufnr, lnum, line, answer)
    end)
 end
 
-M.bookmark_prev = function() end
-M.bookmark_next = function() end
+M.bookmark_prev = function()
+   local mark = M.bookmark_line(lnum)
+end
+
+M.bookmark_next = function()
+   local mark = M.bookmark_line(lnum)
+end
+
 M.bookmark_showall = function() end
 
 M.refresh = function(bufnr)
@@ -108,10 +122,10 @@ M.refresh = function(bufnr)
    local marks = config.cache.data[file]
    local signlines = {}
    if marks then
-      for _, m in ipairs(marks) do
+      for k, v in pairs(marks) do
          local ma = {
-            type = m.a and "ann" or "add",
-            lnum = m.l,
+            type = v.a and "ann" or "add",
+            lnum = tonumber(k),
          }
          signs:remove(bufnr, ma.lnum)
          table.insert(signlines, ma)

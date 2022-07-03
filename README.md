@@ -39,9 +39,9 @@ require('bookmarks').setup {
   on_attach = function(bufnr)
     local bm = require "bookmarks"
     local map = vim.keymap.set
-    map("n","mm",bm.bookmark_toggle)
-    map("n","mc",bm.bookmark_clean)
-    map("n","mi",bm.bookmark_ann)
+    map("n","mm",bm.bookmark_toggle) -- mark signs or not signs
+    map("n","mc",bm.bookmark_clean) -- clean all marks in local buffer
+    map("n","mi",bm.bookmark_ann) -- add mark annotation
   end
 }
 ```
