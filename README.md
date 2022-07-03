@@ -35,13 +35,15 @@ Here is an example with most of the default settings:
 
 ```lua
 require('bookmarks').setup {
-  save_file = "$HOME/.bookmarks",
+  save_file = "$HOME/.bookmarks", -- bookmarks save file path
   on_attach = function(bufnr)
     local bm = require "bookmarks"
     local map = vim.keymap.set
-    map("n","mm",bm.bookmark_toggle) -- mark signs or not signs
+    map("n","mm",bm.bookmark_toggle) -- add or remove bookmark at current line
+    map("n","mi",bm.bookmark_ann) -- add mark annotation at current line
     map("n","mc",bm.bookmark_clean) -- clean all marks in local buffer
-    map("n","mi",bm.bookmark_ann) -- add mark annotation
+    map("n","mn",bm.bookmark_next) -- jump to next mark in local buffer
+    map("n","mp",bm.bookmark_prev) -- jump to previous mark in local buffer
   end
 }
 ```
