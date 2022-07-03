@@ -84,7 +84,7 @@ M.bookmark_line = function(lnum, bufnr)
    bufnr = bufnr or current_buf()
    local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
    local marks = config.cache["data"][file]
-   return marks[lnum]
+   return lnum and marks[lnum] or marks
 end
 
 M.bookmark_ann = function()
@@ -103,12 +103,40 @@ M.bookmark_ann = function()
    end)
 end
 
+local jump_line = function(prev)
+   local lnum = api.nvim_win_get_cursor(0)[1]
+   local marks = M.bookmark_line()
+   local small, big = {}, {}
+   for k, _ in pairs(marks) do
+      k = tonumber(k)
+      if prev and k <= lnum or k < lnum then
+         table.insert(small, k)
+      else
+         table.insert(big, k)
+      end
+   end
+   if prev then
+      table.sort(small, function(a, b)
+         return a > b
+      end)
+      lnum = small[1]
+   else
+      table.sort(big)
+      lnum = big[1]
+   end
+   api.nvim_win_set_cursor(0, { lnum, 0 })
+   local mark = marks[tostring(lnum)]
+   if mark.a ~= "" then
+      print(mark.a)
+   end
+end
+
 M.bookmark_prev = function()
-   local mark = M.bookmark_line(lnum)
+   jump_line(true)
 end
 
 M.bookmark_next = function()
-   local mark = M.bookmark_line(lnum)
+   jump_line(false)
 end
 
 M.bookmark_showall = function() end
@@ -135,15 +163,21 @@ M.refresh = function(bufnr)
 end
 
 function M.loadBookmarks()
-   utils.read_file(config.save_file, function(data)
-      local contents = vim.json.decode(data)
-      config.cache = contents
+   local file = uv.fs_realpath(config.save_file)
+   if file == nil then
+      return
+   end
+   utils.read_file(file, function(data)
+      config.cache = vim.json.decode(data)
+      config.marks = data
    end)
 end
 
 function M.saveBookmarks()
    local data = vim.json.encode(config.cache)
-   utils.write_file(config.save_file, data)
+   if config.marks ~= data then
+      utils.write_file(config.save_file, data)
+   end
 end
 
 return M
