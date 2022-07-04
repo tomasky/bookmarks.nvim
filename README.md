@@ -35,7 +35,13 @@ Here is an example with most of the default settings:
 
 ```lua
 require('bookmarks').setup {
-  save_file = "$HOME/.bookmarks", -- bookmarks save file path
+  save_file = vim.fn.expand "$HOME/.bookmarks", -- bookmarks save file path
+  keywords =  {
+    ["@t"] = "☑️ ", -- mark annotation startswith @t signs this icon of todo
+    ["@w"] = "⚠️ ", -- mark annotation startswith @w signs this icon of warn
+    ["@f"] = "⛏ ", -- mark annotation startswith @f signs this icon of fix
+    ["@n"] = " ", -- mark annotation startswith @n signs this icon of note
+  },
   on_attach = function(bufnr)
     local bm = require "bookmarks"
     local map = vim.keymap.set
@@ -44,9 +50,18 @@ require('bookmarks').setup {
     map("n","mc",bm.bookmark_clean) -- clean all marks in local buffer
     map("n","mn",bm.bookmark_next) -- jump to next mark in local buffer
     map("n","mp",bm.bookmark_prev) -- jump to previous mark in local buffer
+    map("n","ml",bm.bookmark_list) -- show marked file list in quickfix window
   end
 }
 ```
+
+## Telescope
+
+```lua
+require('telescope').load_extension('bookmarks')
+```
+
+Then use `:Telescope bookmarks list` or `require('telescope').extensions.bookmarks.list()`
 
 ## Credits
 

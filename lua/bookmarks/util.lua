@@ -152,4 +152,22 @@ function M.lazy(fn)
    end
 end
 
+function M.setqflist(content, opts)
+   if type(opts) == "string" then
+      opts = { cwd = opts }
+      if opts.cwd:sub(1, 4) == "cwd=" then
+         opts.cwd = opts.cwd:sub(5)
+      end
+   end
+   opts = opts or {}
+   opts.open = (opts.open ~= nil) and opts.open or true
+   vim.fn.setqflist({}, " ", { title = "Todo", id = "$", items = content })
+   if opts.open then
+      vim.cmd [[copen]]
+   end
+   -- local win = vim.fn.getqflist { winid = true }
+   -- if win.winid ~= 0 then
+   -- end
+end
+
 return M

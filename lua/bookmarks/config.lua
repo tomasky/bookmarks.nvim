@@ -2,6 +2,10 @@ local M = {}
 M.config = {}
 
 M.schema = {
+   keywords = {
+      type = "table",
+      default = { ["@t"] = "☑️ ", ["@w"] = "⚠️ ", ["@f"] = "⛏ ", ["@n"] = " " },
+   },
    cache = {
       type = "table",
       deep_extend = true,

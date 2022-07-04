@@ -127,7 +127,7 @@ local jump_line = function(prev)
    api.nvim_win_set_cursor(0, { lnum, 0 })
    local mark = marks[tostring(lnum)]
    if mark.a ~= "" then
-      print(mark.a)
+      api.nvim_echo({ { mark.a, "WarningMsg" } }, true, {})
    end
 end
 
@@ -139,7 +139,19 @@ M.bookmark_next = function()
    jump_line(false)
 end
 
-M.bookmark_showall = function() end
+M.bookmark_list = function()
+   local allmarks = config.cache.data
+   local marklist = {}
+   for k, ma in pairs(allmarks) do
+      if utils.path_exists(k) == false then
+         allmarks[k] = nil
+      end
+      for l, v in pairs(ma) do
+         table.insert(marklist, k .. "|" .. l .. "|" .. v.m .. "|" .. v.a)
+      end
+   end
+   utils.setqflist(marklist)
+end
 
 M.refresh = function(bufnr)
    bufnr = bufnr or current_buf()
@@ -163,14 +175,12 @@ M.refresh = function(bufnr)
 end
 
 function M.loadBookmarks()
-   local file = uv.fs_realpath(config.save_file)
-   if file == nil then
-      return
+   if utils.path_exists(config.save_file) then
+      utils.read_file(config.save_file, function(data)
+         config.cache = vim.json.decode(data)
+         config.marks = data
+      end)
    end
-   utils.read_file(file, function(data)
-      config.cache = vim.json.decode(data)
-      config.marks = data
-   end)
 end
 
 function M.saveBookmarks()
