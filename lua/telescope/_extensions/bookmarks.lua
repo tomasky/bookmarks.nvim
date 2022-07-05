@@ -26,7 +26,7 @@ local function bookmark(opts)
          table.insert(marklist, {
             filename = k,
             lnum = tonumber(l),
-            text = v.a ~= "" and get_text(v.a) or v.m,
+            text = v.a and get_text(v.a) or v.m,
          })
       end
    end

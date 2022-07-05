@@ -9,7 +9,7 @@ M.schema = {
    cache = {
       type = "table",
       deep_extend = true,
-      default = {},
+      default = { data = {} },
    },
    save_file = {
       type = "string",

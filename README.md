@@ -37,10 +37,10 @@ Here is an example with most of the default settings:
 require('bookmarks').setup {
   save_file = vim.fn.expand "$HOME/.bookmarks", -- bookmarks save file path
   keywords =  {
-    ["@t"] = "☑️ ", -- mark annotation startswith @t signs this icon of todo
-    ["@w"] = "⚠️ ", -- mark annotation startswith @w signs this icon of warn
-    ["@f"] = "⛏ ", -- mark annotation startswith @f signs this icon of fix
-    ["@n"] = " ", -- mark annotation startswith @n signs this icon of note
+    ["@t"] = "☑️ ", -- mark annotation startswith @t ,signs this icon of todo
+    ["@w"] = "⚠️ ", -- mark annotation startswith @w ,signs this icon of warn
+    ["@f"] = "⛏ ", -- mark annotation startswith @f ,signs this icon of fix
+    ["@n"] = " ", -- mark annotation startswith @n ,signs this icon of note
   },
   on_attach = function(bufnr)
     local bm = require "bookmarks"

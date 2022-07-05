@@ -38,7 +38,7 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
          break
       end
    end
-   if isIns == false then
+   if isIns == false or ann then
       marks = marks or {}
       marks[tostring(lnum)] = ann and { m = mark, a = ann } or { m = mark }
       -- check buffer auto_save to file
@@ -69,7 +69,7 @@ M.bookmark_toggle = function()
       signs:remove(bufnr, lnum)
       updateBookmarks(bufnr, lnum, "")
    else
-      local line = api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1]
+      local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
       updateBookmarks(bufnr, lnum, line)
    end
 end
@@ -83,8 +83,8 @@ end
 M.bookmark_line = function(lnum, bufnr)
    bufnr = bufnr or current_buf()
    local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-   local marks = config.cache["data"][file]
-   return lnum and marks[lnum] or marks
+   local marks = config.cache["data"][file] or {}
+   return lnum and marks[tostring(lnum)] or marks
 end
 
 M.bookmark_ann = function()
@@ -98,7 +98,7 @@ M.bookmark_ann = function()
    local input_msg = isExt and "Edit:" or "Enter:"
    local mark = M.bookmark_line(lnum, bufnr)
    vim.ui.input({ prompt = input_msg, default = mark.a }, function(answer)
-      local line = api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1]
+      local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
       updateBookmarks(bufnr, lnum, line, answer)
    end)
 end
@@ -109,25 +109,30 @@ local jump_line = function(prev)
    local small, big = {}, {}
    for k, _ in pairs(marks) do
       k = tonumber(k)
-      if prev and k <= lnum or k < lnum then
+      if k < lnum then
          table.insert(small, k)
-      else
+      elseif k > lnum then
          table.insert(big, k)
       end
    end
    if prev then
-      table.sort(small, function(a, b)
+      local tmp = #small > 0 and small or big
+      table.sort(tmp, function(a, b)
          return a > b
       end)
-      lnum = small[1]
+      lnum = tmp[1]
    else
-      table.sort(big)
-      lnum = big[1]
+      local tmp = #big > 0 and big or small
+      table.sort(tmp)
+      lnum = tmp[1]
    end
-   api.nvim_win_set_cursor(0, { lnum, 0 })
-   local mark = marks[tostring(lnum)]
-   if mark.a ~= "" then
-      api.nvim_echo({ { mark.a, "WarningMsg" } }, true, {})
+   if lnum then
+      api.nvim_win_set_cursor(0, { lnum, 0 })
+      local mark = marks[tostring(lnum)]
+      if mark.a then
+         api.nvim_echo({ { "ann: " .. mark.a, "WarningMsg" } }, false, {})
+      else
+      end
    end
 end
 
@@ -147,7 +152,7 @@ M.bookmark_list = function()
          allmarks[k] = nil
       end
       for l, v in pairs(ma) do
-         table.insert(marklist, k .. "|" .. l .. "|" .. v.m .. "|" .. v.a)
+         table.insert(marklist, k .. "|" .. l .. "|" .. v.m .. "|" .. (v.a or ""))
       end
    end
    utils.setqflist(marklist)
