@@ -5,6 +5,7 @@ if not has_telescope then
 end
 local finders = require "telescope.finders"
 local pickers = require "telescope.pickers"
+local entry_display = require "telescope.pickers.entry_display"
 local conf = require("telescope.config").values
 local config = require("bookmarks.config").config
 local utils = require "telescope.utils"
@@ -31,7 +32,7 @@ local function bookmark(opts)
       end
    end
    local display = function(entry)
-      local displayer = pickers.entry_display.create {
+      local displayer = entry_display.create {
          separator = "▏",
          items = {
             { width = 5 },
@@ -54,7 +55,7 @@ local function bookmark(opts)
             return {
                valid = true,
                value = entry,
-               display = display(entry),
+               display = display,
                ordinal = entry.filename .. entry.text,
                filename = entry.filename,
                lnum = entry.lnum,

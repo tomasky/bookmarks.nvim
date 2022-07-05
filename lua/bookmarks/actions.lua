@@ -152,7 +152,7 @@ M.bookmark_list = function()
          allmarks[k] = nil
       end
       for l, v in pairs(ma) do
-         table.insert(marklist, k .. "|" .. l .. "|" .. v.m .. "|" .. (v.a or ""))
+         table.insert(marklist, { filename = k, lnum = l, text = v.m .. "|" .. (v.a or "") })
       end
    end
    utils.setqflist(marklist)
@@ -172,6 +172,11 @@ M.refresh = function(bufnr)
             type = v.a and "ann" or "add",
             lnum = tonumber(k),
          }
+         local pref = string.sub(v.a or "", 1, 2)
+         local text = config.keywords[pref]
+         if text then
+            ma["text"] = text
+         end
          signs:remove(bufnr, ma.lnum)
          table.insert(signlines, ma)
       end

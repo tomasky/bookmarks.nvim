@@ -32,7 +32,7 @@ function M:add(bufnr, signs)
       if not self:contains(bufnr, s.lnum) then
          isExt = false
          local cs = cfg[s.type]
-         local text = cs.text
+         local text = s.text or cs.text
 
          api.nvim_buf_set_extmark(bufnr, self.ns, s.lnum - 1, -1, {
             id = s.lnum,

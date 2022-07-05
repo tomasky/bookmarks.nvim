@@ -161,7 +161,7 @@ function M.setqflist(content, opts)
    end
    opts = opts or {}
    opts.open = (opts.open ~= nil) and opts.open or true
-   vim.fn.setqflist({}, " ", { title = "Todo", id = "$", items = content })
+   vim.fn.setqflist({}, " ", { title = "Bookmarks", id = "$", items = content })
    if opts.open then
       vim.cmd [[copen]]
    end
