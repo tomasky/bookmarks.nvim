@@ -39,6 +39,7 @@ M.attach = void(function(bufnr)
    if config.config.on_attach then
       config.config.on_attach(bufnr)
    end
+   if not api.nvim_buf_is_loaded(bufnr) then return end
    api.nvim_buf_attach(bufnr, false, {
       on_detach = on_detach,
    })
