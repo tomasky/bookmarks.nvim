@@ -67,6 +67,7 @@ M.setup = void(function(cfg)
    config.build(cfg)
    actions.setup()
    nvim.augroup "bookmarks"
+   autocmd("FocusGained", actions.loadBookmarks)
    autocmd("VimLeavePre", M.detach_all)
    autocmd("ColorScheme", hl.setup_highlights)
    on_or_after_vimenter(function()

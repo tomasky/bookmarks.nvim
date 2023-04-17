@@ -45,6 +45,7 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
       -- M.saveBookmarks()
    end
    data[filepath] = marks
+   M.saveBookmarks()
 end
 
 M.toggle_signs = function(value)
