@@ -94,11 +94,16 @@ M.bookmark_ann = function()
       type = "ann",
       lnum = lnum,
    } }
-   local isExt = signs:add(bufnr, signlines)
-   local input_msg = isExt and "Edit:" or "Enter:"
    local mark = M.bookmark_line(lnum, bufnr)
-   vim.ui.input({ prompt = input_msg, default = mark.a }, function(answer)
+   vim.ui.input({ prompt = "Edit:", default = mark.a }, function(answer)
+      if answer == nil then return end
       local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
+      signs:remove(bufnr, lnum)
+      local text = config.keywords[string.sub(answer or "", 1, 2)]
+      if text then
+         signlines[1]["text"] = text
+      end
+      signs:add(bufnr, signlines)
       updateBookmarks(bufnr, lnum, line, answer)
    end)
 end
