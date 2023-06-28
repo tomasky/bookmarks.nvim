@@ -33,6 +33,7 @@ For basic setup with all default configs using [packer.nvim]
 ```lua
 use {
   'tomasky/bookmarks.nvim',
+  -- after = "telescope.nvim",
   event = "VimEnter",
   config = function()
     require('bookmarks').setup()
