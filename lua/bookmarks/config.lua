@@ -45,6 +45,10 @@ M.schema = {
    },
 }
 
+local warn = function(s, ...)
+  vim.notify(s:format(...), vim.log.levels.WARN, { title = 'bookmarks' })
+end
+
 local function validate_config(config)
    for k, v in pairs(config) do
       local kschema = M.schema[k]
