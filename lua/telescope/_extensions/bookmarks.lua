@@ -14,7 +14,7 @@ local function get_text(annotation)
    local pref = string.sub(annotation, 1, 2)
    local ret = config.keywords[pref]
    if ret == nil then
-      ret = "♠ "
+      ret = config.signs.ann.text .. " "
    end
    return ret .. annotation
 end
