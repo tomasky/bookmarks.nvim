@@ -3,10 +3,10 @@ local scheduler = require("bookmarks.async").scheduler
 local api = vim.api
 -- local uv = vim.loop
 local current_buf = api.nvim_get_current_buf
-local config = require "bookmarks.config"
-local nvim = require "bookmarks.nvim"
-local hl = require "bookmarks.highlight"
-local actions = require "bookmarks.actions"
+local config = require("bookmarks.config")
+local nvim = require("bookmarks.nvim")
+local hl = require("bookmarks.highlight")
+local actions = require("bookmarks.actions")
 
 local M = {}
 
@@ -35,11 +35,20 @@ end
 M.attach = void(function(bufnr)
    bufnr = bufnr or current_buf()
    scheduler()
-   actions.loadBookmarks()
+
+   local cwd = vim.fn.getcwd()
+   assert(cwd, "no working directory")
+
+   local scope = config.config.scoped and cwd
+
+   actions.loadBookmarks(scope)
    if config.config.on_attach then
       config.config.on_attach(bufnr)
    end
-   if not api.nvim_buf_is_loaded(bufnr) then return end
+   if not api.nvim_buf_is_loaded(bufnr) then
+      return
+   end
+
    api.nvim_buf_attach(bufnr, false, {
       on_detach = on_detach,
    })
@@ -66,7 +75,7 @@ end
 M.setup = void(function(cfg)
    config.build(cfg)
    actions.setup()
-   nvim.augroup "bookmarks"
+   nvim.augroup("bookmarks")
    autocmd("VimLeavePre", M.detach_all)
    autocmd("ColorScheme", hl.setup_highlights)
    on_or_after_vimenter(function()
