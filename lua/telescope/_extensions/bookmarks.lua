@@ -20,6 +20,7 @@ local function get_text(annotation)
 end
 
 local function bookmark(opts)
+   opts = opts or {}
    local allmarks = config.cache.data
    local marklist = {}
    for k, ma in pairs(allmarks) do
