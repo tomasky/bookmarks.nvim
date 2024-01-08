@@ -28,20 +28,22 @@ end
 function M:add(bufnr, signs)
    local cfg = self.config
    local isExt = true
+   local line_count = api.nvim_buf_line_count(bufnr)
    for _, s in ipairs(signs) do
-      if not self:contains(bufnr, s.lnum) then
-         isExt = false
-         local cs = cfg[s.type]
-         local text = s.text or cs.text
-
-         api.nvim_buf_set_extmark(bufnr, self.ns, s.lnum - 1, -1, {
-            id = s.lnum,
-            sign_text = text,
-            priority = config.sign_priority,
-            sign_hl_group = cs.hl,
-            number_hl_group = config.numhl and cs.numhl or nil,
-            line_hl_group = config.linehl and cs.linehl or nil,
-         })
+      if s.lnum >= 1 and s.lnum <= line_count then
+         if not self:contains(bufnr, s.lnum) then
+            isExt = false
+            local cs = cfg[s.type]
+            local text = s.text or cs.text
+            api.nvim_buf_set_extmark(bufnr, self.ns, s.lnum - 1, -1, {
+               id = s.lnum,
+               sign_text = text,
+               priority = config.sign_priority,
+               sign_hl_group = cs.hl,
+               number_hl_group = config.numhl and cs.numhl or nil,
+               line_hl_group = config.linehl and cs.linehl or nil,
+            })
+         end
       end
    end
    return isExt
