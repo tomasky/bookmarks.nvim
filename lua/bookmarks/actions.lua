@@ -204,7 +204,6 @@ end
 ---@param scope string|nil
 function M.loadBookmarks(scope)
    local path = config.save_file .. "/" .. escape_scope(scope or "%%global%%")
-   vim.notify(string.format("Loading bookmarks %q", path), vim.log.levels.DEBUG)
    config.scope = scope
 
    if utils.path_exists(path) then
@@ -217,8 +216,8 @@ end
 
 function M.saveBookmarks()
    local f = function()
-      local path = config.save_file .. "/" .. escape_scope(config.scope)
-      vim.notify(string.format("Saving bookmarks %q", path), vim.log.levels.DEBUG)
+      local path = config.save_file .. "/" .. escape_scope(config.scope or "%%global%%")
+      -- vim.notify(string.format("Saving bookmarks %q", path), vim.log.levels.DEBUG)
       local data = vim.json.encode(config.cache)
       if config.marks ~= data then
          utils.write_file(path, data)
