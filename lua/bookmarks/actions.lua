@@ -29,6 +29,7 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
       isIns = true
       -- check buffer auto_save to file
    end
+   local line_count = api.nvim_buf_line_count(bufnr)
    for k, _ in pairs(marks or {}) do
       if k == tostring(lnum) then
          isIns = true
@@ -36,6 +37,8 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
             marks[k] = nil
          end
          break
+      elseif tonumber(k) > line_count then
+         marks[k] = nil
       end
    end
    if isIns == false or ann then

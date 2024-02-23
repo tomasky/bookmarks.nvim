@@ -28,8 +28,9 @@ end
 function M:add(bufnr, signs)
    local cfg = self.config
    local isExt = true
+   local line_count = api.nvim_buf_line_count(bufnr)
    for _, s in ipairs(signs) do
-      if not self:contains(bufnr, s.lnum) then
+      if not (s.lnum > line_count) and not self:contains(bufnr, s.lnum) then
          isExt = false
          local cs = cfg[s.type]
          local text = s.text or cs.text
