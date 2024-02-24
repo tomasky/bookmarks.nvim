@@ -15,7 +15,7 @@ local is_unix = false
 if jit_os then
    is_unix = jit_os == "linux" or jit_os == "osx" or jit_os == "bsd"
 else
-   local binfmt = package.cpath:match "%p[\\|/]?%p(%a+)"
+   local binfmt = package.cpath:match("%p[\\|/]?%p(%a+)")
    is_unix = binfmt ~= "dll"
 end
 
@@ -72,7 +72,7 @@ function M.emptytable()
 end
 
 function M.clear_prompt()
-   vim.api.nvim_command "normal! :"
+   vim.api.nvim_command("normal! :")
 end
 
 function M.prompt_yes_no(prompt, callback, prompt_no_cr)
@@ -80,7 +80,7 @@ function M.prompt_yes_no(prompt, callback, prompt_no_cr)
    if prompt_no_cr then -- use getchar so no <cr> is required
       print(prompt)
       local ans = vim.fn.nr2char(vim.fn.getchar())
-      local is_confirmed = ans:lower():match "^y"
+      local is_confirmed = ans:lower():match("^y")
       M.clear_prompt()
       callback(is_confirmed)
    else -- use vim.ui.input
@@ -148,7 +148,7 @@ function M.setqflist(content, opts)
    opts.open = (opts.open ~= nil) and opts.open or true
    vim.fn.setqflist({}, " ", { title = "Bookmarks", id = "$", items = content })
    if opts.open then
-      vim.cmd [[copen]]
+      vim.cmd([[copen]])
    end
    -- local win = vim.fn.getqflist { winid = true }
    -- if win.winid ~= 0 then
