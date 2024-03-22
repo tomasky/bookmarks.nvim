@@ -101,6 +101,10 @@ local function bookmark(opts)
 
 	local function delete_bookmark(prompt_bufnr)
 		local selection = action_state.get_selected_entry()
+		if selection == nil then
+			print("Nothing selected")
+			return
+		end
 
 		local data = config.cache["data"]
 
