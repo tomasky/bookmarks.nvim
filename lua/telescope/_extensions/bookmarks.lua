@@ -133,8 +133,8 @@ local function bookmark(opts)
 
 	pickers
 		.new(opts, {
-			prompt_title = "Bookmarks",
-			results_title = "Bookmarks List",
+			prompt_title = "Search Bookmarks",
+			results_title = "Bookmarks",
 			finder = bookmarks_finder(),
 			sorter = conf.generic_sorter(opts),
 			previewer = conf.qflist_previewer(opts),
