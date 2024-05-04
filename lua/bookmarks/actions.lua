@@ -1,4 +1,5 @@
 local config = require("bookmarks.config").config
+local schema = require("bookmarks.config").schema
 local uv = vim.loop
 local Signs = require "bookmarks.signs"
 local utils = require "bookmarks.util"
@@ -206,6 +207,11 @@ function M.saveBookmarks()
    if config.marks ~= data then
       utils.write_file(config.save_file, data)
    end
+end
+
+function M.bookmark_clear_all()
+    config.cache = schema.cache.default
+    M.saveBookmarks()
 end
 
 return M
