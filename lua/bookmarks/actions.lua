@@ -1,8 +1,9 @@
+---@diagnostic disable: redefined-local
 local config = require("bookmarks.config").config
 local schema = require("bookmarks.config").schema
 local uv = vim.loop
-local Signs = require "bookmarks.signs"
-local utils = require "bookmarks.util"
+local Signs = require("bookmarks.signs")
+local utils = require("bookmarks.util")
 local api = vim.api
 local current_buf = api.nvim_get_current_buf
 local M = {}
@@ -48,6 +49,8 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
       -- check buffer auto_save to file
       -- M.saveBookmarks()
    end
+
+   M.saveBookmarks()
    data[filepath] = marks
 end
 
@@ -100,7 +103,9 @@ M.bookmark_ann = function()
    } }
    local mark = M.bookmark_line(lnum, bufnr)
    vim.ui.input({ prompt = "Edit:", default = mark.a }, function(answer)
-      if answer == nil then return end
+      if answer == nil then
+         return
+      end
       local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
       signs:remove(bufnr, lnum)
       local text = config.keywords[string.sub(answer or "", 1, 2)]
@@ -193,9 +198,20 @@ M.refresh = function(bufnr)
    end
 end
 
-function M.loadBookmarks()
-   if utils.path_exists(config.save_file) then
-      utils.read_file(config.save_file, function(data)
+---@param scope string
+---@return string
+local function escape_scope(scope)
+   local s = scope:gsub(" ", "%%"):gsub("\\", "%%"):gsub("/", "%%")
+   return s
+end
+
+---@param scope string|nil
+function M.loadBookmarks(scope)
+   local path = config.save_file .. "/" .. escape_scope(scope or "%%global%%")
+   config.scope = scope
+
+   if utils.path_exists(path) then
+      utils.read_file(path, function(data)
          config.cache = vim.json.decode(data)
          config.marks = data
       end)
@@ -203,10 +219,31 @@ function M.loadBookmarks()
 end
 
 function M.saveBookmarks()
-   local data = vim.json.encode(config.cache)
-   if config.marks ~= data then
-      utils.write_file(config.save_file, data)
+   local f = function()
+      local path = config.save_file .. "/" .. escape_scope(config.scope or "%%global%%")
+      -- vim.notify(string.format("Saving bookmarks %q", path), vim.log.levels.DEBUG)
+      local data = vim.json.encode(config.cache)
+      if config.marks ~= data then
+         utils.write_file(path, data)
+      end
    end
+
+   uv.fs_stat(config.save_file, function(err, stat)
+      if err then
+         if err:find("ENOENT") then
+            uv.fs_mkdir(config.save_file, 511, function(err)
+               assert(not err, err)
+               f()
+            end)
+         else
+            assert(not err, err)
+         end
+         return
+      end
+      assert(stat)
+      assert(stat.type == "directory", "bookmarks.save_file must be a directory")
+      f()
+   end)
 end
 
 function M.bookmark_clear_all()

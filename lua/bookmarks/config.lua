@@ -13,7 +13,11 @@ M.schema = {
    },
    save_file = {
       type = "string",
-      default = vim.fn.expand "$HOME/.bookmarks",
+      default = vim.fn.stdpath("state") .. "/bookmarks",
+   },
+   scoped = {
+      type = "boolean",
+      default = false,
    },
    sign_priority = {
       type = "number",
@@ -46,7 +50,7 @@ M.schema = {
 }
 
 local warn = function(s, ...)
-  vim.notify(s:format(...), vim.log.levels.WARN, { title = 'bookmarks' })
+   vim.notify(s:format(...), vim.log.levels.WARN, { title = "bookmarks" })
 end
 
 local function validate_config(config)
@@ -56,9 +60,9 @@ local function validate_config(config)
          warn("bookmarks: Ignoring invalid configuration field '%s'", k)
       elseif kschema.type then
          if type(kschema.type) == "string" then
-            vim.validate {
+            vim.validate({
                [k] = { v, kschema.type },
-            }
+            })
          end
       end
    end
