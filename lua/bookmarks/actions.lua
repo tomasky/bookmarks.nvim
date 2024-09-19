@@ -45,10 +45,9 @@ local function updateBookmarks(bufnr, lnum, mark, ann)
    if isIns == false or ann then
       marks = marks or {}
       marks[tostring(lnum)] = ann and { m = mark, a = ann } or { m = mark }
-      -- check buffer auto_save to file
-      -- M.saveBookmarks()
    end
    data[filepath] = marks
+   M.saveBookmarks()
 end
 
 M.toggle_signs = function(value)
