@@ -18,6 +18,7 @@ local scope_cache = {} -- [dir] = scope root | false (known to have none)
 local scope_of = {} -- [file] = scope root | false
 local loaded = {} -- [root] = true, its scope file is in the cache
 local reading = {} -- [root] = true, a read of its scope file is in flight
+local dirty = false -- true when config.cache.data holds changes not yet written
 
 local function alloc_id()
   next_id = next_id + 1
@@ -163,9 +164,6 @@ local ensure_scope
 
 M.setup = function()
   signs = Signs.new(config.signs)
-  -- [path] = the JSON last written there, so an unchanged file is never
-  -- rewritten. Internal state, deliberately not part of the config schema.
-  config.marks = {}
 end
 
 M.detach = function(bufnr, keep_signs)
@@ -198,6 +196,7 @@ local function set_mark(bufnr, lnum, mark, ann)
     marks[key] = m
   end
   signs:add(bufnr, { sign_of(lnum, m) })
+  dirty = true
 end
 
 local function del_mark(bufnr, lnum)
@@ -221,6 +220,7 @@ local function del_mark(bufnr, lnum)
   if next(marks) == nil then
     config.cache.data[file] = nil
   end
+  dirty = true
 end
 
 --- Delete a bookmark given a file path and line number, for callers that are
@@ -240,6 +240,7 @@ function M.bookmark_del(filename, lnum)
   if next(marks) == nil then
     config.cache.data[filename] = nil
   end
+  dirty = true
   if m.id then
     for bufnr in pairs(tracked) do
       if file_of(bufnr) == filename then
@@ -293,8 +294,9 @@ end
 M.bookmark_clean = function()
   local bufnr = current_buf()
   local file = file_of(bufnr)
-  if file then
+  if file and config.cache.data[file] then
     config.cache.data[file] = nil
+    dirty = true
   end
   signs:remove(bufnr)
   synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
@@ -416,8 +418,8 @@ attach_to_buffer = function(bufnr)
   })
 end
 
---- Read the extmarks back and rewrite `config.cache.data` line numbers from
---- them. Extmarks already moved themselves during the edit, so one
+--- Read the extmarks back and rewrite `config.cache.data` line numbers and line
+--- text from them. Extmarks already moved themselves during the edit, so one
 --- nvim_buf_get_extmarks call tells us where every bookmark ended up.
 --- @return boolean true if the positions were read back successfully, false
 --- if the signs are missing/out of sync and the caller must rebuild.
@@ -439,7 +441,8 @@ local function try_resync(bufnr)
   local new_marks = {}
   local matched = 0
   local duplicates = nil
-  for _, m in pairs(marks) do
+  local changed = false
+  for lnum, m in pairs(marks) do
     local row = m.id and positions[m.id]
     if row then
       matched = matched + 1
@@ -450,6 +453,14 @@ local function try_resync(bufnr)
         duplicates = duplicates or {}
         duplicates[#duplicates + 1] = m.id
       else
+        -- `m` is the line's text, kept so the list and the picker can show
+        -- something. The line may have been rewritten since it was bookmarked,
+        -- so re-read it: a bookmark follows its line, text included.
+        local text = api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+        if key ~= lnum or text ~= m.m then
+          changed = true
+        end
+        m.m = text
         new_marks[key] = m
       end
     end
@@ -466,6 +477,9 @@ local function try_resync(bufnr)
   end
 
   config.cache.data[file] = new_marks
+  if changed then
+    dirty = true
+  end
   synced_tick[bufnr] = tick
   return true
 end
@@ -582,6 +596,9 @@ function M.prune_dead(cb)
             data[file] = nil
             removed = true
           end
+        end
+        if removed then
+          dirty = true
         end
         for bufnr in pairs(tracked) do
           local file = file_of(bufnr)
@@ -700,7 +717,6 @@ function M.loadBookmarks(opts)
   local function read_global(data)
     if data then
       config.cache = codec.decode(data) or { data = {} }
-      config.marks[config.save_file] = data
       -- The cache was replaced wholesale, so drop every cached tick: the
       -- positions on screen no longer correspond to what is in memory.
       synced_tick = {}
@@ -733,6 +749,11 @@ end
 --- checkout) and cleans up after a renamed or moved directory. Does nothing
 --- if the save file is missing.
 function M.bookmark_reload()
+  -- Write what this session has first. The read below replaces the cache with
+  -- what is on disk, so a bookmark deleted here but not yet saved would simply
+  -- come back. With nothing pending this is free, and the reload still picks
+  -- up changes made outside nvim.
+  M.saveBookmarks()
   -- loadBookmarks replaces the cache wholesale, so it re-reads every scope
   -- that was already loaded and forgets the memoized scope lookups -- which is
   -- also what rediscovers scope files added or removed outside this nvim
@@ -786,7 +807,6 @@ ensure_scope = function(root, cb)
       for rel, marks in pairs(decoded.data) do
         config.cache.data[root .. "/" .. rel] = marks
       end
-      config.marks[path] = data
       loaded[root] = true
       for _, bufnr in ipairs(api.nvim_list_bufs()) do
         if api.nvim_buf_is_loaded(bufnr) then
@@ -803,13 +823,12 @@ ensure_scope = function(root, cb)
   end)
 end
 
---- Write one bookmarks file, skipping it when its content is unchanged.
+--- Write one bookmarks file. There is no content comparison here: flush() only
+--- runs when something changed, so a file that did not change is simply
+--- rewritten with what it already holds, which costs an async write and
+--- nothing else.
 local function write_one(path, data)
-  local encoded = codec.encode({ data = data })
-  if config.marks[path] ~= encoded then
-    utils.write_file(path, encoded)
-    config.marks[path] = encoded
-  end
+  utils.write_file(path, codec.encode({ data = data }))
 end
 
 --- Write the cache out, split between the global file and one file per scope.
@@ -820,7 +839,16 @@ end
 --- relayed through the global file, so a mark made inside a scope is in that
 --- scope's file the next time it is written, whether or not this session had
 --- read the scope before.
+---
+--- A flush with nothing pending returns immediately. `dirty` is cleared by the
+--- last flush, so it means "config.cache.data holds changes not yet written",
+--- and a session that only looked at its bookmarks -- the common one -- never
+--- encodes or writes anything at all.
 local function flush()
+  if not dirty then
+    return
+  end
+
   local global = {}
   local scopes = {}
   for file, marks in pairs(config.cache.data) do
@@ -852,7 +880,6 @@ local function flush()
     local path = scope_path(root)
     if not utils.path_exists(path) then
       loaded[root] = nil
-      config.marks[path] = nil
     elseif loaded[root] then
       -- Read into this session, so the cache is the whole story for this
       -- scope and the file can be replaced outright -- which is how a deleted
@@ -876,6 +903,9 @@ local function flush()
       end
     end
   end
+  -- Cleared last, so a flush that blows up halfway leaves the changes pending
+  -- instead of losing them.
+  dirty = false
 end
 
 --- Persist the cache. `opts.prune` additionally drops entries whose file is
@@ -899,6 +929,7 @@ end
 function M.bookmark_clear_all()
   config.cache = vim.deepcopy(schema.cache.default)
   synced_tick = {}
+  dirty = true
   for bufnr in pairs(tracked) do
     signs:remove(bufnr)
   end
@@ -926,13 +957,15 @@ function M.toggle_scope()
   if not utils.path_exists(path) then
     -- Create the file for real, and synchronously: scope_root() has to see it
     -- before flush() can route anything into it.
-    local ok, err = utils.write_file_sync(path, '{"data":{}}')
+    local ok, err = utils.write_file_sync(path, codec.encode({ data = {} }))
     if not ok then
       utils.warn("bookmarks: cannot create %s (%s)", path, err or "unknown error")
       return
     end
     clear_scope_cache()
     loaded[root] = true
+    -- Routing changed, so this is a write even though no bookmark did.
+    dirty = true
     flush()
     utils.warn("bookmarks: created %s", path)
     return
@@ -962,9 +995,10 @@ function M.toggle_scope()
   clear_scope_cache()
   -- Clearing the cache above also cancels any read still in flight, so its
   -- result is dropped instead of resurrecting the bookmarks we just discarded.
-  config.marks[path] = nil
   -- A scope is turned off by deleting its file, so its bookmarks go with it.
   utils.remove_file(path)
+  -- The dropped bookmarks are a change like any other, and the routing moved.
+  dirty = true
   flush()
   utils.warn("bookmarks: deleted %s", path)
 end
