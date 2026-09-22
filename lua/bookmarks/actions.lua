@@ -269,15 +269,11 @@ end
 
 M.bookmark_list = function()
   M.sync_all()
-  local allmarks = config.cache.data
+  M.prune_dead()
   local marklist = {}
-  for k, ma in pairs(allmarks) do
-    if utils.path_exists(k) == false then
-      allmarks[k] = nil
-    else
-      for l, v in pairs(ma) do
-        table.insert(marklist, { filename = k, lnum = l, text = v.m .. "|" .. (v.a or "") })
-      end
+  for file, marks in pairs(config.cache.data) do
+    for lnum, v in pairs(marks) do
+      table.insert(marklist, { filename = file, lnum = lnum, text = v.m .. "|" .. (v.a or "") })
     end
   end
   utils.setqflist(marklist)
@@ -402,6 +398,32 @@ M.refresh = function(bufnr)
   paint(bufnr, file)
 end
 
+--- Drop bookmarks whose file is gone from disk and clear their signs from any
+--- buffer still showing them. A renamed or moved directory therefore loses its
+--- bookmarks silently -- there is no path remapping. Returns true if anything
+--- was removed.
+function M.prune_dead()
+  local data = config.cache.data
+  local dead = nil
+  for file in pairs(data) do
+    if utils.path_missing(file) then
+      data[file] = nil
+      dead = dead or {}
+      dead[file] = true
+    end
+  end
+  if not dead then
+    return false
+  end
+  for bufnr in pairs(tracked) do
+    local file = file_of(bufnr)
+    if file and dead[file] then
+      signs:remove(bufnr)
+    end
+  end
+  return true
+end
+
 --- Resync every tracked buffer. Call this before reading the cache from
 --- outside the edit path (list, telescope, save) so the line numbers are
 --- current rather than whatever they were at the last edit.
@@ -449,6 +471,7 @@ end
 
 function M.saveBookmarks()
   M.sync_all()
+  M.prune_dead()
   local data = vim.json.encode(strip_ids(config.cache))
   if config.marks ~= data then
     utils.write_file(config.save_file, data)

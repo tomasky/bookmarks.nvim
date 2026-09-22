@@ -5,6 +5,17 @@ function M.path_exists(path)
   return vim.loop.fs_stat(path) and true or false
 end
 
+--- True only when the path is definitely gone (ENOENT). Any other stat
+--- failure -- EACCES, ESTALE, an unreachable network mount -- must NOT be
+--- read as "deleted", or a transient error would erase bookmarks.
+function M.path_missing(path)
+  local stat, err = uv.fs_stat(path)
+  if stat then
+    return false
+  end
+  return err ~= nil and err:find("ENOENT", 1, true) ~= nil
+end
+
 local jit_os
 
 if jit then

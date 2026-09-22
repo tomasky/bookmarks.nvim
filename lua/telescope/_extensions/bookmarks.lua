@@ -22,8 +22,9 @@ end
 
 local function get_list()
   -- Bookmark line numbers are kept in sync lazily, so fold in any pending
-  -- edits before listing them.
+  -- edits before listing them, and drop entries whose file is gone.
   actions.sync_all()
+  actions.prune_dead()
   local marklist = {}
   for file, marks in pairs(config.cache.data) do
     for lnum, v in pairs(marks) do
