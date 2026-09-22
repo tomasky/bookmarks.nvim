@@ -90,7 +90,9 @@ local function bookmark(opts)
       sorter = conf.generic_sorter(opts),
       previewer = conf.qflist_previewer(opts),
       attach_mappings = function(prompt_bufnr, map)
-        map({ "i", "n" }, "<del>", delete_selected)
+        -- <C-d> rather than <Del> so the prompt keeps its native forward
+        -- delete, and so the same key works without leaving insert mode.
+        map({ "i", "n" }, "<C-d>", delete_selected)
         return true
       end,
     })

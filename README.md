@@ -12,7 +12,7 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
 - open bookmarks in a quickfix list
 - search marks with Telescope
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
-  - press `<del>` to delete the selected bookmark
+  - press `<C-d>` to delete the selected bookmark
 
 ## Requirements
 
