@@ -719,8 +719,13 @@ function M.loadBookmarks(opts)
     if data then
       config.cache = codec.decode(data) or { data = {} }
       -- What is on disk is what the cache now holds, so the next save must not
-      -- rewrite this file just because it was loaded.
-      digests[config.save_file] = vim.fn.sha256(data)
+      -- rewrite this file just because it was loaded. Seeding the digest means
+      -- calling vim.fn, which this libuv callback is not allowed to do, so it
+      -- happens on the main loop -- any time before the next save is soon
+      -- enough.
+      vim.schedule(function()
+        digests[config.save_file] = vim.fn.sha256(data)
+      end)
       -- The cache was replaced wholesale, so drop every cached tick: the
       -- positions on screen no longer correspond to what is in memory.
       synced_tick = {}
