@@ -5,6 +5,9 @@ local M = {}
 
 local group_base = "bookmarks_extmark_signs_"
 
+--- Highlight group for the inline annotation text.
+local VIRT_HL = "BookMarksVirtText"
+
 function M.new(cfg, name)
   local self = setmetatable({}, { __index = M })
   self.config = cfg
@@ -37,6 +40,7 @@ function M:add(bufnr, signs)
   for _, s in ipairs(signs) do
     if s.lnum <= line_count then
       local cs = cfg[s.type]
+      local virt = s.virt_text and { { s.virt_text, VIRT_HL } } or nil
       api.nvim_buf_set_extmark(bufnr, self.ns, s.lnum - 1, -1, {
         id = s.id,
         sign_text = s.text or cs.text,
@@ -44,6 +48,8 @@ function M:add(bufnr, signs)
         sign_hl_group = cs.hl,
         number_hl_group = config.numhl and cs.numhl or nil,
         line_hl_group = config.linehl and cs.linehl or nil,
+        virt_text = virt,
+        virt_text_pos = virt and "eol" or nil,
       })
     end
   end

@@ -19,6 +19,10 @@ M.schema = {
     type = "boolean",
     default = true,
   },
+  auto_close_list = {
+    type = "boolean",
+    default = false,
+  },
   sign_priority = {
     type = "number",
     default = 6,
@@ -32,6 +36,10 @@ M.schema = {
     default = false,
   },
   linehl = {
+    type = "boolean",
+    default = false,
+  },
+  virt_text = {
     type = "boolean",
     default = false,
   },

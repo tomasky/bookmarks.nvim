@@ -5,15 +5,15 @@ function M.path_exists(path)
   return vim.loop.fs_stat(path) and true or false
 end
 
---- True only when the path is definitely gone (ENOENT). Any other stat
---- failure -- EACCES, ESTALE, an unreachable network mount -- must NOT be
---- read as "deleted", or a transient error would erase bookmarks.
-function M.path_missing(path)
-  local stat, err = uv.fs_stat(path)
-  if stat then
-    return false
-  end
-  return err ~= nil and err:find("ENOENT", 1, true) ~= nil
+--- Async existence check. Calls cb(true) only when the path is definitely
+--- gone (ENOENT). Any other stat failure -- EACCES, ESTALE, an unreachable
+--- network mount -- is reported as "still there", so a transient error never
+--- erases bookmarks. The stat runs on the libuv thread pool, so a hung mount
+--- cannot stall the caller.
+function M.path_missing_async(path, cb)
+  uv.fs_stat(path, function(err)
+    cb(err ~= nil and err:find("ENOENT", 1, true) ~= nil)
+  end)
 end
 
 local jit_os
@@ -158,12 +158,24 @@ function M.setqflist(content, opts)
   opts = opts or {}
   opts.open = (opts.open ~= nil) and opts.open or true
   vim.fn.setqflist({}, " ", { title = "Bookmarks", id = "$", items = content })
-  if opts.open then
-    vim.cmd([[copen]])
+  if not opts.open then
+    return
   end
-  -- local win = vim.fn.getqflist { winid = true }
-  -- if win.winid ~= 0 then
-  -- end
+  vim.cmd([[copen]])
+  if opts.close_on_select then
+    local winid = vim.fn.getqflist({ winid = true }).winid
+    local bufnr = winid ~= 0 and vim.api.nvim_win_get_buf(winid) or nil
+    if bufnr then
+      -- Jump to the entry as usual, then close the list. remap = true so the
+      -- <CR> on the right goes through the quickfix window's own <CR>
+      -- handling (the qf window has no <CR> mapping, it is built in).
+      vim.keymap.set("n", "<CR>", "<CR><Cmd>cclose<CR>", {
+        buffer = bufnr,
+        silent = true,
+        remap = true,
+      })
+    end
+  end
 end
 
 return M

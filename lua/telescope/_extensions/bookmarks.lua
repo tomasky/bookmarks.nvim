@@ -22,9 +22,9 @@ end
 
 local function get_list()
   -- Bookmark line numbers are kept in sync lazily, so fold in any pending
-  -- edits before listing them, and drop entries whose file is gone.
+  -- edits before listing them. Dead entries are pruned by bookmark() before
+  -- the picker opens, so this stays synchronous.
   actions.sync_all()
-  actions.prune_dead()
   local marklist = {}
   for file, marks in pairs(config.cache.data) do
     for lnum, v in pairs(marks) do
@@ -84,20 +84,24 @@ end
 
 local function bookmark(opts)
   opts = opts or {}
-  pickers
-    .new(opts, {
-      prompt_title = "bookmarks",
-      finder = make_finder(),
-      sorter = conf.generic_sorter(opts),
-      previewer = conf.qflist_previewer(opts),
-      attach_mappings = function(prompt_bufnr, map)
-        -- <C-d> rather than <Del> so the prompt keeps its native forward
-        -- delete, and so the same key works without leaving insert mode.
-        map({ "i", "n" }, "<C-d>", delete_selected)
-        return true
-      end,
-    })
-    :find()
+  -- Drop entries whose file is gone before showing them. The checks are async,
+  -- so a slow or hung mount cannot stall the picker from opening.
+  actions.prune_dead(function()
+    pickers
+      .new(opts, {
+        prompt_title = "bookmarks",
+        finder = make_finder(),
+        sorter = conf.generic_sorter(opts),
+        previewer = conf.qflist_previewer(opts),
+        attach_mappings = function(prompt_bufnr, map)
+          -- <C-d> rather than <Del> so the prompt keeps its native forward
+          -- delete, and so the same key works without leaving insert mode.
+          map({ "i", "n" }, "<C-d>", delete_selected)
+          return true
+        end,
+      })
+      :find()
+  end)
 end
 
 return telescope.register_extension({ exports = { list = bookmark } })

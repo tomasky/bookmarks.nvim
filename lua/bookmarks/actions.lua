@@ -56,6 +56,28 @@ end
 
 M.ann_icon = ann_icon
 
+local function trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+--- Inline text to show next to a bookmarked line, or nil when there is
+--- nothing worth showing. A keyword annotation renders as its icon followed
+--- by the annotation without the "@x" prefix ("@t buy milk" -> "☑️ buy
+--- milk"). Anything else is shown as typed, because its first character is
+--- already the icon, so repeating it would just duplicate a letter.
+local function ann_text(ann)
+  if not ann or ann == "" then
+    return nil
+  end
+  if ann:sub(1, 1) == "@" and config.keywords[ann:sub(1, 2)] then
+    local icon = trim(config.keywords[ann:sub(1, 2)])
+    local body = trim(ann:sub(3))
+    return body == "" and icon or icon .. " " .. body
+  end
+  local body = trim(ann)
+  return body == "" and nil or body
+end
+
 --- Build the sign descriptor for a mark. The mark's id is stable, so the
 --- extmark keeps its identity and Neovim moves it automatically on edits.
 local function sign_of(lnum, mark)
@@ -64,6 +86,7 @@ local function sign_of(lnum, mark)
     lnum = lnum,
     type = mark.a and "ann" or "add",
     text = ann_icon(mark.a),
+    virt_text = config.virt_text and ann_text(mark.a) or nil,
   }
 end
 
@@ -179,6 +202,21 @@ M.toggle_signs = function(value)
   return config.signcolumn
 end
 
+--- Show or hide bookmark annotations as inline virtual text. With no argument,
+--- flips the current setting. Repaints every tracked buffer so the change
+--- applies to all open windows at once.
+M.toggle_virt_text = function(value)
+  if value ~= nil then
+    config.virt_text = value
+  else
+    config.virt_text = not config.virt_text
+  end
+  for bufnr in pairs(tracked) do
+    M.refresh(bufnr)
+  end
+  return config.virt_text
+end
+
 M.bookmark_toggle = function()
   local bufnr = current_buf()
   local lnum = api.nvim_win_get_cursor(0)[1]
@@ -269,14 +307,17 @@ end
 
 M.bookmark_list = function()
   M.sync_all()
-  M.prune_dead()
-  local marklist = {}
-  for file, marks in pairs(config.cache.data) do
-    for lnum, v in pairs(marks) do
-      table.insert(marklist, { filename = file, lnum = lnum, text = v.m .. "|" .. (v.a or "") })
+  -- prune_dead is async, so build the list only once the dead entries are
+  -- actually gone.
+  M.prune_dead(function()
+    local marklist = {}
+    for file, marks in pairs(config.cache.data) do
+      for lnum, v in pairs(marks) do
+        table.insert(marklist, { filename = file, lnum = lnum, text = v.m .. "|" .. (v.a or "") })
+      end
     end
-  end
-  utils.setqflist(marklist)
+    utils.setqflist(marklist, { close_on_select = config.auto_close_list })
+  end)
 end
 
 attach_to_buffer = function(bufnr)
@@ -357,7 +398,9 @@ resync = function(bufnr)
     return
   end
   if not try_resync(bufnr) then
-    M.refresh(bufnr)
+    -- try_resync just established the signs are gone, so tell refresh to skip
+    -- its own read-back and rebuild straight from the cached positions.
+    M.refresh(bufnr, true)
   end
 end
 
@@ -380,7 +423,7 @@ local function paint(bufnr, file)
   synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
 end
 
-M.refresh = function(bufnr)
+M.refresh = function(bufnr, skip_resync)
   bufnr = bufnr or current_buf()
   if not api.nvim_buf_is_loaded(bufnr) then
     return
@@ -392,36 +435,95 @@ M.refresh = function(bufnr)
   -- Fold in any edits the extmarks already absorbed before rebuilding, so we
   -- never redraw signs at stale line numbers. If the signs are gone (buffer
   -- was reloaded) this fails and we rebuild from the cached positions.
-  if synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
+  -- skip_resync is set by resync, which has already made that attempt.
+  if not skip_resync and synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
     try_resync(bufnr)
   end
   paint(bufnr, file)
 end
 
+--- How long prune_dead waits for its async existence checks before giving up.
+--- A stat that never returns (a hung network mount) must not block the caller
+--- forever. Paths we could not check are kept: we only ever delete what is
+--- positively confirmed gone.
+local PRUNE_TIMEOUT_MS = 500
+
 --- Drop bookmarks whose file is gone from disk and clear their signs from any
 --- buffer still showing them. A renamed or moved directory therefore loses its
---- bookmarks silently -- there is no path remapping. Returns true if anything
---- was removed.
-function M.prune_dead()
-  local data = config.cache.data
+--- bookmarks silently -- there is no path remapping.
+---
+--- The existence checks run on the libuv thread pool, so a slow mount cannot
+--- freeze the caller, and a timeout bounds the wait so an unreachable mount
+--- cannot stall it either. `cb(removed)` fires once every path has been
+--- checked or the timeout expires, with the cache already cleaned.
+function M.prune_dead(cb)
+  local files = {}
+  for file in pairs(config.cache.data) do
+    files[#files + 1] = file
+  end
+  if #files == 0 then
+    if cb then
+      cb(false)
+    end
+    return
+  end
+
+  local pending = #files
   local dead = nil
-  for file in pairs(data) do
-    if utils.path_missing(file) then
-      data[file] = nil
-      dead = dead or {}
-      dead[file] = true
+  local finished = false
+  local timer = uv.new_timer()
+
+  local function finish()
+    if finished then
+      return
     end
-  end
-  if not dead then
-    return false
-  end
-  for bufnr in pairs(tracked) do
-    local file = file_of(bufnr)
-    if file and dead[file] then
-      signs:remove(bufnr)
+    finished = true
+    if timer then
+      timer:stop()
+      timer:close()
+      timer = nil
     end
+    -- The stats land inside libuv callbacks, where the buffer API is off
+    -- limits (E5560). Hop back to the main loop before touching signs.
+    vim.schedule(function()
+      local data = config.cache.data
+      local removed = false
+      if dead then
+        for file in pairs(dead) do
+          if data[file] ~= nil then
+            data[file] = nil
+            removed = true
+          end
+        end
+        for bufnr in pairs(tracked) do
+          local file = file_of(bufnr)
+          if file and dead[file] then
+            signs:remove(bufnr)
+          end
+        end
+      end
+      if cb then
+        cb(removed)
+      end
+    end)
   end
-  return true
+
+  if timer then
+    timer:start(PRUNE_TIMEOUT_MS, 0, finish)
+  end
+
+  for _, file in ipairs(files) do
+    utils.path_missing_async(file, function(missing)
+      if missing then
+        dead = dead or {}
+        dead[file] = true
+      end
+      pending = pending - 1
+      if pending == 0 then
+        finish()
+      end
+    end)
+  end
 end
 
 --- Resync every tracked buffer. Call this before reading the cache from
@@ -466,9 +568,10 @@ function M.loadBookmarks(opts)
         end
       end
       if prune_and_save then
-        -- saveBookmarks prunes the orphans and persists the result, and its
-        -- prune also clears the signs it just painted for dead files.
-        M.saveBookmarks()
+        -- The prune lives on this path only (bookmark_reload), never on the
+        -- exit path. Its sign cleanup also removes the signs just painted for
+        -- the dead files.
+        M.saveBookmarks({ prune = true })
       end
     end)
   end)
@@ -483,13 +586,30 @@ function M.bookmark_reload()
   M.loadBookmarks({ prune_and_save = true })
 end
 
-function M.saveBookmarks()
-  M.sync_all()
-  M.prune_dead()
+--- Write the cache out, skipping the write when nothing changed.
+local function flush()
   local data = vim.json.encode(strip_ids(config.cache))
   if config.marks ~= data then
     utils.write_file(config.save_file, data)
     config.marks = data
+  end
+end
+
+--- Persist the cache. `opts.prune` additionally drops entries whose file is
+--- gone and rewrites the cache if that removed anything. The first write is
+--- deliberately not gated on the prune: the prune is a best-effort cleanup
+--- that can be cut short, and a stat that never returns must never cost us the
+--- save. Only bookmark_reload asks for pruning -- on the exit path it would
+--- read an unmounted drive as a mass deletion.
+function M.saveBookmarks(opts)
+  M.sync_all()
+  flush()
+  if opts and opts.prune then
+    M.prune_dead(function(removed)
+      if removed then
+        flush()
+      end
+    end)
   end
 end
 

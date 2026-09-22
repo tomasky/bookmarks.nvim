@@ -9,7 +9,10 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
   - An annotation that does not start with `@` uses its first character as the
     icon, so emoji work too: annotate a line with `🎯 fix this` and the sign
     shows `🎯`
+- Show annotations inline as virtual text at the end of the line
+  - off by default; set `virt_text = true` or call `require('bookmarks').toggle_virt_text()`
 - open bookmarks in a quickfix list
+  - set `auto_close_list = true` to close the list after jumping to a bookmark
 - search marks with Telescope
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
   - press `<C-d>` to delete the selected bookmark
@@ -52,6 +55,8 @@ require('bookmarks').setup {
   -- sign_priority = 8,  --set bookmark sign priority to cover other sign
   save_file = vim.fn.expand "$HOME/.bookmarks", -- bookmarks save file path
   save_on_exit = true, -- write the save file on exit; set false to control saving yourself
+  auto_close_list = false, -- close the quickfix window after jumping to a bookmark
+  virt_text = false, -- show annotations as virtual text at the end of the line
   keywords =  {
     ["@t"] = "☑️ ", -- mark annotation startswith @t ,signs this icon as `Todo`
     ["@w"] = "⚠️ ", -- mark annotation startswith @w ,signs this icon as `Warn`
@@ -70,6 +75,7 @@ require('bookmarks').setup {
     map("n","ml",bm.bookmark_list) -- show marked file list in quickfix window
     map("n","mx",bm.bookmark_clear_all) -- removes all bookmarks
     map("n","mr",bm.bookmark_reload) -- reload bookmarks, drop dead entries, and save
+    map("n","mt",bm.toggle_virt_text) -- toggle inline annotation text
   end
 }
 ```

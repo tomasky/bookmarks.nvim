@@ -6,6 +6,7 @@ local M = {}
 local hls = {
   { BookMarksAdd = { "MarkAdd" } },
   { BookMarksAnn = { "MarkAnn" } },
+  { BookMarksVirtText = { "Comment" } },
 }
 
 local function is_hl_set(hl_name)
