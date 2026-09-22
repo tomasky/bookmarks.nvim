@@ -320,21 +320,9 @@ resync = function(bufnr)
   end
 end
 
-M.refresh = function(bufnr)
-  bufnr = bufnr or current_buf()
-  if not api.nvim_buf_is_loaded(bufnr) then
-    return
-  end
-  local file = file_of(bufnr)
-  if not file then
-    return
-  end
-  -- Fold in any edits the extmarks already absorbed before rebuilding, so we
-  -- never redraw signs at stale line numbers. If the signs are gone (buffer
-  -- was reloaded) this fails and we rebuild from the cached positions.
-  if synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
-    try_resync(bufnr)
-  end
+--- Render the cached marks for `file` into `bufnr` as signs. Assumes the
+--- cache is already current, so it does not read the extmarks back first.
+local function paint(bufnr, file)
   local marks = config.cache.data[file]
   signs:remove(bufnr)
   if marks then
@@ -351,6 +339,24 @@ M.refresh = function(bufnr)
   synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
 end
 
+M.refresh = function(bufnr)
+  bufnr = bufnr or current_buf()
+  if not api.nvim_buf_is_loaded(bufnr) then
+    return
+  end
+  local file = file_of(bufnr)
+  if not file then
+    return
+  end
+  -- Fold in any edits the extmarks already absorbed before rebuilding, so we
+  -- never redraw signs at stale line numbers. If the signs are gone (buffer
+  -- was reloaded) this fails and we rebuild from the cached positions.
+  if synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
+    try_resync(bufnr)
+  end
+  paint(bufnr, file)
+end
+
 --- Resync every tracked buffer. Call this before reading the cache from
 --- outside the edit path (list, telescope, save) so the line numbers are
 --- current rather than whatever they were at the last edit.
@@ -365,17 +371,23 @@ function M.loadBookmarks()
     utils.read_file(config.save_file, function(data)
       config.cache = vim.json.decode(data)
       config.marks = data
-      -- Positions from disk may not match what is on screen; force a resync.
+      -- The cache was replaced wholesale, so drop every cached tick: the
+      -- positions on screen no longer correspond to what is in memory.
       synced_tick = {}
       -- The read is async, so any buffer that was opened before it finished
       -- (the file nvim started with, or anything read during startup) is
       -- still blank. Paint them all now that the cache is actually populated.
+      -- paint() rather than refresh(): the cache was just replaced wholesale,
+      -- so there is nothing meaningful to read back from the old extmarks.
       -- Deferred via vim.schedule: this callback runs inside a libuv
       -- callback, which is not a safe place to call the buffer API.
       vim.schedule(function()
         for _, bufnr in ipairs(api.nvim_list_bufs()) do
           if api.nvim_buf_is_loaded(bufnr) then
-            M.refresh(bufnr)
+            local file = file_of(bufnr)
+            if file then
+              paint(bufnr, file)
+            end
           end
         end
       end)
