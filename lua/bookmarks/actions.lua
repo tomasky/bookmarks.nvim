@@ -1,8 +1,8 @@
 local config = require("bookmarks.config").config
 local schema = require("bookmarks.config").schema
 local uv = vim.loop
-local Signs = require "bookmarks.signs"
-local utils = require "bookmarks.util"
+local Signs = require("bookmarks.signs")
+local utils = require("bookmarks.util")
 local api = vim.api
 local current_buf = api.nvim_get_current_buf
 local M = {}
@@ -99,7 +99,9 @@ M.bookmark_ann = function()
   } }
   local mark = M.bookmark_line(lnum, bufnr)
   vim.ui.input({ prompt = "Edit:", default = mark.a }, function(answer)
-    if answer == nil then return end
+    if answer == nil then
+      return
+    end
     local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
     signs:remove(bufnr, lnum)
     local text = config.keywords[string.sub(answer or "", 1, 2)]
@@ -166,7 +168,9 @@ M.bookmark_list = function()
 end
 
 local function attach_to_buffer(bufnr)
-  if attached_buffers[bufnr] then return end
+  if attached_buffers[bufnr] then
+    return
+  end
   attached_buffers[bufnr] = true
 
   api.nvim_buf_attach(bufnr, false, {
@@ -175,10 +179,14 @@ local function attach_to_buffer(bufnr)
     end,
     on_lines = function(_, _, _, firstline, old_lastline, new_lastline, _)
       local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-      if not file or not config.cache.data[file] then return end
+      if not file or not config.cache.data[file] then
+        return
+      end
 
       local delta = new_lastline - old_lastline
-      if delta == 0 then return end
+      if delta == 0 then
+        return
+      end
 
       local old_marks = config.cache.data[file]
       local new_marks = {}
