@@ -936,7 +936,7 @@ function M.toggle_scope()
     clear_scope_cache()
     loaded[root] = true
     flush()
-    utils.warn("bookmarks: scope on for %s, created %s", root, path)
+    utils.warn("bookmarks: created %s", path)
     return
   end
 
@@ -968,7 +968,7 @@ function M.toggle_scope()
   -- A scope is turned off by deleting its file, so its bookmarks go with it.
   utils.remove_file(path)
   flush()
-  utils.warn("bookmarks: scope off for %s, deleted %s", root, path)
+  utils.warn("bookmarks: deleted %s", path)
 end
 
 return M
