@@ -52,7 +52,9 @@ M.detach_all = void(function(bufnr)
   scheduler()
   -- Save first: positions are read back from the extmarks, so the signs must
   -- still be alive when we persist.
-  actions.saveBookmarks()
+  if config.config.save_on_exit then
+    actions.saveBookmarks()
+  end
   actions.detach(bufnr)
 end)
 

@@ -15,6 +15,10 @@ M.schema = {
     type = "string",
     default = vim.fn.expand("$HOME/.bookmarks"),
   },
+  save_on_exit = {
+    type = "boolean",
+    default = true,
+  },
   sign_priority = {
     type = "number",
     default = 6,
