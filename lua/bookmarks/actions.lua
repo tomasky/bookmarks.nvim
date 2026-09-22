@@ -36,15 +36,34 @@ function M.invalidate_path(bufnr)
   path_cache[bufnr] = nil
 end
 
+--- Icon to show for an annotation. An annotation starting with "@" uses the
+--- configured keyword table ("@t" -> checkbox, ...); anything else gives up
+--- its first character, so plain letters and emoji both work as icons.
+--- Returns nil to mean "use the default sign text".
+local function ann_icon(ann)
+  if not ann or ann == "" then
+    return nil
+  end
+  if ann:sub(1, 1) == "@" then
+    return config.keywords[ann:sub(1, 2)]
+  end
+  local first = vim.fn.strcharpart(ann, 0, 1)
+  if first == "" or first == " " then
+    return nil
+  end
+  return first
+end
+
+M.ann_icon = ann_icon
+
 --- Build the sign descriptor for a mark. The mark's id is stable, so the
 --- extmark keeps its identity and Neovim moves it automatically on edits.
 local function sign_of(lnum, mark)
-  local ann = mark.a
   return {
     id = mark.id,
     lnum = lnum,
-    type = ann and "ann" or "add",
-    text = ann and config.keywords[string.sub(ann, 1, 2)] or nil,
+    type = mark.a and "ann" or "add",
+    text = ann_icon(mark.a),
   }
 end
 
@@ -121,6 +140,32 @@ local function del_mark(bufnr, lnum)
   end
   if next(marks) == nil then
     config.cache.data[file] = nil
+  end
+end
+
+--- Delete a bookmark given a file path and line number, for callers that are
+--- not sitting in the bookmark's buffer (e.g. the telescope picker). Also
+--- drops the sign from any loaded buffer showing that file.
+function M.bookmark_del(filename, lnum)
+  local marks = config.cache.data[filename]
+  if not marks then
+    return
+  end
+  local key = tostring(lnum)
+  local m = marks[key]
+  if not m then
+    return
+  end
+  marks[key] = nil
+  if next(marks) == nil then
+    config.cache.data[filename] = nil
+  end
+  if m.id then
+    for bufnr in pairs(tracked) do
+      if file_of(bufnr) == filename then
+        signs:del(bufnr, m.id)
+      end
+    end
   end
 end
 

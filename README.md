@@ -6,9 +6,13 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
 
 - Display different icons according to annotation keywords
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures2.png)
+  - An annotation that does not start with `@` uses its first character as the
+    icon, so emoji work too: annotate a line with `🎯 fix this` and the sign
+    shows `🎯`
 - open bookmarks in a quickfix list
 - search marks with Telescope
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
+  - press `<del>` to delete the selected bookmark
 
 ## Requirements
 
@@ -52,6 +56,7 @@ require('bookmarks').setup {
     ["@w"] = "⚠️ ", -- mark annotation startswith @w ,signs this icon as `Warn`
     ["@f"] = "⛏ ", -- mark annotation startswith @f ,signs this icon as `Fix`
     ["@n"] = " ", -- mark annotation startswith @n ,signs this icon as `Note`
+    -- annotations that do not start with @ use their first character instead
   },
   on_attach = function(bufnr)
     local bm = require "bookmarks"

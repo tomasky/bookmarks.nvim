@@ -6,71 +6,93 @@ end
 local finders = require("telescope.finders")
 local pickers = require("telescope.pickers")
 local entry_display = require("telescope.pickers.entry_display")
+local action_state = require("telescope.actions.state")
 local conf = require("telescope.config").values
 local config = require("bookmarks.config").config
+local actions = require("bookmarks.actions")
 local utils = require("telescope.utils")
 
 local function get_text(annotation)
-  local pref = string.sub(annotation, 1, 2)
-  local ret = config.keywords[pref]
+  local ret = actions.ann_icon(annotation)
   if ret == nil then
     ret = config.signs.ann.text .. " "
   end
   return ret .. annotation
 end
 
-local function bookmark(opts)
-  opts = opts or {}
+local function get_list()
   -- Bookmark line numbers are kept in sync lazily, so fold in any pending
   -- edits before listing them.
-  require("bookmarks.actions").sync_all()
-  local allmarks = config.cache.data
+  actions.sync_all()
   local marklist = {}
-  for k, ma in pairs(allmarks) do
-    for l, v in pairs(ma) do
+  for file, marks in pairs(config.cache.data) do
+    for lnum, v in pairs(marks) do
       table.insert(marklist, {
-        filename = k,
-        lnum = tonumber(l),
+        filename = file,
+        lnum = tonumber(lnum),
         text = v.a and get_text(v.a) or v.m,
       })
     end
   end
-  local display = function(entry)
-    local displayer = entry_display.create({
-      separator = "▏",
-      items = {
-        { width = 5 },
-        { width = 30 },
-        { remaining = true },
-      },
-    })
-    local line_info = { entry.lnum, "TelescopeResultsLineNr" }
-    return displayer({
-      line_info,
-      entry.text:gsub(".* | ", ""),
-      utils.path_smart(entry.filename), -- or path_tail
-    })
+  return marklist
+end
+
+local function display(entry)
+  local displayer = entry_display.create({
+    separator = "▏",
+    items = {
+      { width = 5 },
+      { width = 30 },
+      { remaining = true },
+    },
+  })
+  local line_info = { entry.lnum, "TelescopeResultsLineNr" }
+  return displayer({
+    line_info,
+    entry.text:gsub(".* | ", ""),
+    utils.path_smart(entry.filename), -- or path_tail
+  })
+end
+
+local function make_finder()
+  return finders.new_table({
+    results = get_list(),
+    entry_maker = function(entry)
+      return {
+        valid = true,
+        value = entry,
+        display = display,
+        ordinal = entry.filename .. entry.text,
+        filename = entry.filename,
+        lnum = entry.lnum,
+        col = 1,
+        text = entry.text,
+      }
+    end,
+  })
+end
+
+local function delete_selected(prompt_bufnr)
+  local entry = action_state.get_selected_entry()
+  if not entry then
+    return
   end
+  actions.bookmark_del(entry.filename, entry.lnum)
+  action_state.get_current_picker(prompt_bufnr):refresh(make_finder())
+end
+
+local function bookmark(opts)
+  opts = opts or {}
   pickers
     .new(opts, {
       prompt_title = "bookmarks",
-      finder = finders.new_table({
-        results = marklist,
-        entry_maker = function(entry)
-          return {
-            valid = true,
-            value = entry,
-            display = display,
-            ordinal = entry.filename .. entry.text,
-            filename = entry.filename,
-            lnum = entry.lnum,
-            col = 1,
-            text = entry.text,
-          }
-        end,
-      }),
+      finder = make_finder(),
       sorter = conf.generic_sorter(opts),
       previewer = conf.qflist_previewer(opts),
+      attach_mappings = function(prompt_bufnr, map)
+        map({ "i", "n" }, "<del>", delete_selected)
+        return true
+      end,
     })
     :find()
 end
