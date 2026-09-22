@@ -13,49 +13,39 @@ function M.new(cfg, name)
   return self
 end
 
-function M:on_lines(buf, last_new)
-  self:remove(buf, last_new + 1)
+function M:remove(bufnr)
+  api.nvim_buf_clear_namespace(bufnr, self.ns, 0, -1)
 end
 
-function M:remove(bufnr, start_lnum)
-  if start_lnum then
-    api.nvim_buf_clear_namespace(bufnr, self.ns, start_lnum - 1, start_lnum)
-  else
-    api.nvim_buf_clear_namespace(bufnr, self.ns, 0, -1)
+function M:del(bufnr, id)
+  api.nvim_buf_del_extmark(bufnr, self.ns, id)
+end
+
+--- Map of extmark id -> 0-based row for every sign in the buffer.
+--- One API call, no matter how many signs there are.
+function M:positions(bufnr)
+  local res = {}
+  for _, m in ipairs(api.nvim_buf_get_extmarks(bufnr, self.ns, 0, -1, {})) do
+    res[m[1]] = m[2]
   end
+  return res
 end
 
 function M:add(bufnr, signs)
   local cfg = self.config
-  local isExt = true
   local line_count = api.nvim_buf_line_count(bufnr)
   for _, s in ipairs(signs) do
-    if not (s.lnum > line_count) and not self:contains(bufnr, s.lnum) then
-      isExt = false
+    if s.lnum <= line_count then
       local cs = cfg[s.type]
-      local text = s.text or cs.text
-
       api.nvim_buf_set_extmark(bufnr, self.ns, s.lnum - 1, -1, {
-        id = s.lnum,
-        sign_text = text,
+        id = s.id,
+        sign_text = s.text or cs.text,
         priority = config.sign_priority,
         sign_hl_group = cs.hl,
         number_hl_group = config.numhl and cs.numhl or nil,
         line_hl_group = config.linehl and cs.linehl or nil,
       })
     end
-  end
-  return isExt
-end
-
-function M:contains(bufnr, start)
-  local marks = api.nvim_buf_get_extmarks(bufnr, self.ns, { start - 1, 0 }, { start, 0 }, { limit = 1 })
-  return marks and #marks > 0
-end
-
-function M:reset()
-  for _, buf in ipairs(api.nvim_list_bufs()) do
-    self:remove(buf)
   end
 end
 

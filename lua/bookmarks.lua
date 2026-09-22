@@ -50,8 +50,10 @@ end)
 M.detach_all = void(function(bufnr)
   bufnr = bufnr or current_buf()
   scheduler()
-  actions.detach(bufnr)
+  -- Save first: positions are read back from the extmarks, so the signs must
+  -- still be alive when we persist.
   actions.saveBookmarks()
+  actions.detach(bufnr)
 end)
 
 local function on_or_after_vimenter(fn)
@@ -71,12 +73,21 @@ M.setup = void(function(cfg)
   nvim.augroup("bookmarks")
   autocmd("VimLeavePre", M.detach_all)
   autocmd("ColorScheme", hl.setup_highlights)
+  -- Signs follow their extmarks automatically while editing, so no
+  -- TextChanged autocmd is needed. Only rebuild when a buffer is (re)loaded
+  -- or regains focus, and drop the memoized path when the file is renamed
+  -- or written under a new name.
+  nvim.autocmd({ "BufFilePost", "BufWritePost" }, {
+    group = "bookmarks",
+    callback = function(args)
+      actions.invalidate_path(args.buf)
+    end,
+  })
   on_or_after_vimenter(function()
     hl.setup_highlights()
     M.attach()
     autocmd("FocusGained", actions.refresh)
     autocmd("BufReadPost", actions.refresh)
-    autocmd({ "TextChanged", "TextChangedI" }, actions.refresh)
   end)
 end)
 

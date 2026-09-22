@@ -7,7 +7,63 @@ local api = vim.api
 local current_buf = api.nvim_get_current_buf
 local M = {}
 local signs
-local attached_buffers = {}
+
+-- Per-session state. None of this is persisted.
+local next_id = 0
+local path_cache = {} -- [bufnr] = realpath | false (known to have none)
+local synced_tick = {} -- [bufnr] = changedtick at the last resync
+local tracked = {} -- [bufnr] = true, buffers whose signs we manage
+
+local function alloc_id()
+  next_id = next_id + 1
+  return next_id
+end
+
+--- Realpath of a buffer's file, memoized per buffer. Replaces a synchronous
+--- fs_realpath syscall on every operation. Invalidated by invalidate_path().
+local function file_of(bufnr)
+  local cached = path_cache[bufnr]
+  if cached ~= nil then
+    return cached or nil
+  end
+  local name = api.nvim_buf_get_name(bufnr)
+  local path = name ~= "" and uv.fs_realpath(name) or nil
+  path_cache[bufnr] = path or false
+  return path
+end
+
+function M.invalidate_path(bufnr)
+  path_cache[bufnr] = nil
+end
+
+--- Build the sign descriptor for a mark. The mark's id is stable, so the
+--- extmark keeps its identity and Neovim moves it automatically on edits.
+local function sign_of(lnum, mark)
+  local ann = mark.a
+  return {
+    id = mark.id,
+    lnum = lnum,
+    type = ann and "ann" or "add",
+    text = ann and config.keywords[string.sub(ann, 1, 2)] or nil,
+  }
+end
+
+--- Copy the cache without the transient extmark ids, so the on-disk JSON
+--- format stays exactly as it was before this refactor.
+local function strip_ids(cache)
+  local out = { data = {} }
+  for file, marks in pairs(cache.data or {}) do
+    local copy = {}
+    for lnum, v in pairs(marks) do
+      copy[lnum] = { m = v.m, a = v.a }
+    end
+    out.data[file] = copy
+  end
+  return out
+end
+
+local resync
+local attach_to_buffer
 
 M.setup = function()
   signs = Signs.new(config.signs)
@@ -19,35 +75,53 @@ M.detach = function(bufnr, keep_signs)
   end
 end
 
-local function updateBookmarks(bufnr, lnum, mark, ann)
-  local filepath = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-  if filepath == nil then
+local function set_mark(bufnr, lnum, mark, ann)
+  local file = file_of(bufnr)
+  if not file then
     return
   end
-  local data = config.cache["data"]
-  local marks = data[filepath]
-  local isIns = false
-  if lnum == -1 then
-    marks = nil
-    isIns = true
+  local data = config.cache.data
+  local marks = data[file]
+  if not marks then
+    marks = {}
+    data[file] = marks
   end
-  local line_count = api.nvim_buf_line_count(bufnr)
-  for k, _ in pairs(marks or {}) do
-    if k == tostring(lnum) then
-      isIns = true
-      if mark == "" then
-        marks[k] = nil
-      end
-      break
-    elseif tonumber(k) > line_count then
-      marks[k] = nil
+  local key = tostring(lnum)
+  local m = marks[key]
+  if m then
+    m.m = mark
+    m.a = ann
+    if m.id == nil then
+      m.id = alloc_id()
     end
+  else
+    m = { m = mark, a = ann, id = alloc_id() }
+    marks[key] = m
   end
-  if isIns == false or ann then
-    marks = marks or {}
-    marks[tostring(lnum)] = ann and { m = mark, a = ann } or { m = mark }
+  signs:add(bufnr, { sign_of(lnum, m) })
+end
+
+local function del_mark(bufnr, lnum)
+  local file = file_of(bufnr)
+  if not file then
+    return
   end
-  data[filepath] = marks
+  local marks = config.cache.data[file]
+  if not marks then
+    return
+  end
+  local key = tostring(lnum)
+  local m = marks[key]
+  if not m then
+    return
+  end
+  marks[key] = nil
+  if m.id then
+    signs:del(bufnr, m.id)
+  end
+  if next(marks) == nil then
+    config.cache.data[file] = nil
+  end
 end
 
 M.toggle_signs = function(value)
@@ -61,55 +135,50 @@ M.toggle_signs = function(value)
 end
 
 M.bookmark_toggle = function()
-  local lnum = api.nvim_win_get_cursor(0)[1]
   local bufnr = current_buf()
-  local signlines = { {
-    type = "add",
-    lnum = lnum,
-  } }
-  local isExt = signs:add(bufnr, signlines)
-  if isExt then
-    signs:remove(bufnr, lnum)
-    updateBookmarks(bufnr, lnum, "")
+  local lnum = api.nvim_win_get_cursor(0)[1]
+  local file = file_of(bufnr)
+  if not file then
+    return
+  end
+  local marks = config.cache.data[file]
+  if marks and marks[tostring(lnum)] then
+    del_mark(bufnr, lnum)
   else
     local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
-    updateBookmarks(bufnr, lnum, line)
+    set_mark(bufnr, lnum, line, nil)
   end
 end
 
 M.bookmark_clean = function()
   local bufnr = current_buf()
+  local file = file_of(bufnr)
+  if file then
+    config.cache.data[file] = nil
+  end
   signs:remove(bufnr)
-  updateBookmarks(bufnr, -1, "")
+  synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
 end
 
 M.bookmark_line = function(lnum, bufnr)
   bufnr = bufnr or current_buf()
-  local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-  local marks = config.cache["data"][file] or {}
+  resync(bufnr)
+  local file = file_of(bufnr)
+  local marks = file and config.cache.data[file] or nil
+  marks = marks or {}
   return lnum and marks[tostring(lnum)] or marks
 end
 
 M.bookmark_ann = function()
-  local lnum = api.nvim_win_get_cursor(0)[1]
   local bufnr = current_buf()
-  local signlines = { {
-    type = "ann",
-    lnum = lnum,
-  } }
+  local lnum = api.nvim_win_get_cursor(0)[1]
   local mark = M.bookmark_line(lnum, bufnr)
   vim.ui.input({ prompt = "Edit:", default = mark.a }, function(answer)
     if answer == nil then
       return
     end
     local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
-    signs:remove(bufnr, lnum)
-    local text = config.keywords[string.sub(answer or "", 1, 2)]
-    if text then
-      signlines[1]["text"] = text
-    end
-    signs:add(bufnr, signlines)
-    updateBookmarks(bufnr, lnum, line, answer)
+    set_mark(bufnr, lnum, line, answer)
   end)
 end
 
@@ -154,89 +223,141 @@ M.bookmark_next = function()
 end
 
 M.bookmark_list = function()
+  M.sync_all()
   local allmarks = config.cache.data
   local marklist = {}
   for k, ma in pairs(allmarks) do
     if utils.path_exists(k) == false then
       allmarks[k] = nil
-    end
-    for l, v in pairs(ma) do
-      table.insert(marklist, { filename = k, lnum = l, text = v.m .. "|" .. (v.a or "") })
+    else
+      for l, v in pairs(ma) do
+        table.insert(marklist, { filename = k, lnum = l, text = v.m .. "|" .. (v.a or "") })
+      end
     end
   end
   utils.setqflist(marklist)
 end
 
-local function attach_to_buffer(bufnr)
-  if attached_buffers[bufnr] then
+attach_to_buffer = function(bufnr)
+  if tracked[bufnr] then
     return
   end
-  attached_buffers[bufnr] = true
-
+  tracked[bufnr] = true
   api.nvim_buf_attach(bufnr, false, {
     on_detach = function()
-      attached_buffers[bufnr] = nil
-    end,
-    on_lines = function(_, _, _, firstline, old_lastline, new_lastline, _)
-      local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-      if not file or not config.cache.data[file] then
-        return
-      end
-
-      local delta = new_lastline - old_lastline
-      if delta == 0 then
-        return
-      end
-
-      local old_marks = config.cache.data[file]
-      local new_marks = {}
-
-      for k, v in pairs(old_marks) do
-        local linenum = tonumber(k)
-        if linenum < firstline + 1 then
-          new_marks[tostring(linenum)] = v
-        elseif delta > 0 then
-          new_marks[tostring(linenum + delta)] = v
-        elseif delta < 0 then
-          if linenum + delta >= firstline + 1 then
-            new_marks[tostring(linenum + delta)] = v
-          end
-        end
-      end
-
-      config.cache.data[file] = new_marks
-      M.refresh(bufnr)
+      tracked[bufnr] = nil
+      synced_tick[bufnr] = nil
+      path_cache[bufnr] = nil
     end,
   })
 end
 
-M.refresh = function(bufnr)
-  bufnr = bufnr or current_buf()
-  local file = uv.fs_realpath(api.nvim_buf_get_name(bufnr))
-  if file == nil then
+--- Read the extmarks back and rewrite `config.cache.data` line numbers from
+--- them. Extmarks already moved themselves during the edit, so one
+--- nvim_buf_get_extmarks call tells us where every bookmark ended up.
+--- @return boolean true if the positions were read back successfully, false
+--- if the signs are missing/out of sync and the caller must rebuild.
+local function try_resync(bufnr)
+  local tick = api.nvim_buf_get_changedtick(bufnr)
+  local file = file_of(bufnr)
+  local marks = file and config.cache.data[file] or nil
+  if not marks then
+    synced_tick[bufnr] = tick
+    return true
+  end
+
+  local count = 0
+  for _ in pairs(marks) do
+    count = count + 1
+  end
+
+  local positions = signs:positions(bufnr)
+  local new_marks = {}
+  local matched = 0
+  local duplicates = nil
+  for _, m in pairs(marks) do
+    local row = m.id and positions[m.id]
+    if row then
+      matched = matched + 1
+      local key = tostring(row + 1)
+      if new_marks[key] then
+        -- Two bookmarks collapsed onto one line (e.g. a line join). Keep the
+        -- first and drop the redundant extmark so signs match the data.
+        duplicates = duplicates or {}
+        duplicates[#duplicates + 1] = m.id
+      else
+        new_marks[key] = m
+      end
+    end
+  end
+
+  if matched ~= count then
+    return false
+  end
+
+  if duplicates then
+    for _, id in ipairs(duplicates) do
+      signs:del(bufnr, id)
+    end
+  end
+
+  config.cache.data[file] = new_marks
+  synced_tick[bufnr] = tick
+  return true
+end
+
+--- Bring `config.cache.data` line numbers back in sync with the buffer.
+--- Guarded by changedtick, so repeated calls with no edits are free.
+resync = function(bufnr)
+  if not api.nvim_buf_is_loaded(bufnr) then
     return
   end
+  if synced_tick[bufnr] == api.nvim_buf_get_changedtick(bufnr) then
+    return
+  end
+  if not try_resync(bufnr) then
+    M.refresh(bufnr)
+  end
+end
+
+M.refresh = function(bufnr)
+  bufnr = bufnr or current_buf()
+  if not api.nvim_buf_is_loaded(bufnr) then
+    return
+  end
+  local file = file_of(bufnr)
+  if not file then
+    return
+  end
+  -- Fold in any edits the extmarks already absorbed before rebuilding, so we
+  -- never redraw signs at stale line numbers. If the signs are gone (buffer
+  -- was reloaded) this fails and we rebuild from the cached positions.
+  if synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
+    try_resync(bufnr)
+  end
   local marks = config.cache.data[file]
-  local signlines = {}
+  signs:remove(bufnr)
   if marks then
+    local signlines = {}
     for k, v in pairs(marks) do
-      local ma = {
-        type = v.a and "ann" or "add",
-        lnum = tonumber(k),
-      }
-      local pref = string.sub(v.a or "", 1, 2)
-      local text = config.keywords[pref]
-      if text then
-        ma["text"] = text
+      if v.id == nil then
+        v.id = alloc_id()
       end
-      signs:remove(bufnr, ma.lnum)
-      table.insert(signlines, ma)
+      signlines[#signlines + 1] = sign_of(tonumber(k), v)
     end
     signs:add(bufnr, signlines)
   end
-
-  -- Attach buffer once
   attach_to_buffer(bufnr)
+  synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
+end
+
+--- Resync every tracked buffer. Call this before reading the cache from
+--- outside the edit path (list, telescope, save) so the line numbers are
+--- current rather than whatever they were at the last edit.
+function M.sync_all()
+  for bufnr in pairs(tracked) do
+    resync(bufnr)
+  end
 end
 
 function M.loadBookmarks()
@@ -244,19 +365,27 @@ function M.loadBookmarks()
     utils.read_file(config.save_file, function(data)
       config.cache = vim.json.decode(data)
       config.marks = data
+      -- Positions from disk may not match what is on screen; force a resync.
+      synced_tick = {}
     end)
   end
 end
 
 function M.saveBookmarks()
-  local data = vim.json.encode(config.cache)
+  M.sync_all()
+  local data = vim.json.encode(strip_ids(config.cache))
   if config.marks ~= data then
     utils.write_file(config.save_file, data)
+    config.marks = data
   end
 end
 
 function M.bookmark_clear_all()
-  config.cache = schema.cache.default
+  config.cache = vim.deepcopy(schema.cache.default)
+  synced_tick = {}
+  for bufnr in pairs(tracked) do
+    signs:remove(bufnr)
+  end
   M.saveBookmarks()
 end
 

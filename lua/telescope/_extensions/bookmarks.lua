@@ -21,6 +21,9 @@ end
 
 local function bookmark(opts)
   opts = opts or {}
+  -- Bookmark line numbers are kept in sync lazily, so fold in any pending
+  -- edits before listing them.
+  require("bookmarks.actions").sync_all()
   local allmarks = config.cache.data
   local marklist = {}
   for k, ma in pairs(allmarks) do
