@@ -433,40 +433,54 @@ function M.sync_all()
   end
 end
 
-function M.loadBookmarks()
-  if utils.path_exists(config.save_file) then
-    utils.read_file(config.save_file, function(data)
-      config.cache = vim.json.decode(data)
-      config.marks = data
-      -- The cache was replaced wholesale, so drop every cached tick: the
-      -- positions on screen no longer correspond to what is in memory.
-      synced_tick = {}
-      -- The read is async, so any buffer that was opened before it finished
-      -- (the file nvim started with, or anything read during startup) is
-      -- still blank. Paint them all now that the cache is actually populated.
-      -- paint() rather than refresh(): the cache was just replaced wholesale,
-      -- so there is nothing meaningful to read back from the old extmarks.
-      -- Deferred via vim.schedule: this callback runs inside a libuv
-      -- callback, which is not a safe place to call the buffer API.
-      vim.schedule(function()
-        for _, bufnr in ipairs(api.nvim_list_bufs()) do
-          if api.nvim_buf_is_loaded(bufnr) then
-            local file = file_of(bufnr)
-            if file then
-              paint(bufnr, file)
-            end
+--- Read the bookmarks file and repaint every loaded buffer.
+--- @param opts table|nil `prune_and_save` additionally drops entries whose
+---   file is gone and writes the cleaned cache back. Only bookmark_reload
+---   sets it: doing that at startup would read an unmounted drive as a mass
+---   deletion.
+function M.loadBookmarks(opts)
+  local prune_and_save = opts and opts.prune_and_save
+  if not utils.path_exists(config.save_file) then
+    return
+  end
+  utils.read_file(config.save_file, function(data)
+    config.cache = vim.json.decode(data)
+    config.marks = data
+    -- The cache was replaced wholesale, so drop every cached tick: the
+    -- positions on screen no longer correspond to what is in memory.
+    synced_tick = {}
+    -- The read is async, so any buffer that was opened before it finished
+    -- (the file nvim started with, or anything read during startup) is still
+    -- blank. Paint them all now that the cache is actually populated.
+    -- paint() rather than refresh(): the cache was just replaced wholesale,
+    -- so there is nothing meaningful to read back from the old extmarks.
+    -- Deferred via vim.schedule: this callback runs inside a libuv callback,
+    -- which is not a safe place to call the buffer API.
+    vim.schedule(function()
+      for _, bufnr in ipairs(api.nvim_list_bufs()) do
+        if api.nvim_buf_is_loaded(bufnr) then
+          local file = file_of(bufnr)
+          if file then
+            paint(bufnr, file)
           end
         end
-      end)
+      end
+      if prune_and_save then
+        -- saveBookmarks prunes the orphans and persists the result, and its
+        -- prune also clears the signs it just painted for dead files.
+        M.saveBookmarks()
+      end
     end)
-  end
+  end)
 end
 
---- Re-read the bookmarks file from disk and repaint the loaded buffers.
---- Useful when the file was changed outside this nvim instance (another
---- instance, a manual edit, a git checkout). Does nothing if it is missing.
+--- Re-read the bookmarks file, drop entries whose file is gone, repaint the
+--- loaded buffers and write the cleaned cache back. Picks up changes made
+--- outside this nvim instance (another instance, a manual edit, a git
+--- checkout) and cleans up after a renamed or moved directory. Does nothing
+--- if the save file is missing.
 function M.bookmark_reload()
-  M.loadBookmarks()
+  M.loadBookmarks({ prune_and_save = true })
 end
 
 function M.saveBookmarks()
