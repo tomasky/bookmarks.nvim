@@ -367,6 +367,18 @@ function M.loadBookmarks()
       config.marks = data
       -- Positions from disk may not match what is on screen; force a resync.
       synced_tick = {}
+      -- The read is async, so any buffer that was opened before it finished
+      -- (the file nvim started with, or anything read during startup) is
+      -- still blank. Paint them all now that the cache is actually populated.
+      -- Deferred via vim.schedule: this callback runs inside a libuv
+      -- callback, which is not a safe place to call the buffer API.
+      vim.schedule(function()
+        for _, bufnr in ipairs(api.nvim_list_bufs()) do
+          if api.nvim_buf_is_loaded(bufnr) then
+            M.refresh(bufnr)
+          end
+        end
+      end)
     end)
   end
 end
