@@ -440,6 +440,13 @@ function M.loadBookmarks()
   end
 end
 
+--- Re-read the bookmarks file from disk and repaint the loaded buffers.
+--- Useful when the file was changed outside this nvim instance (another
+--- instance, a manual edit, a git checkout). Does nothing if it is missing.
+function M.bookmark_reload()
+  M.loadBookmarks()
+end
+
 function M.saveBookmarks()
   M.sync_all()
   local data = vim.json.encode(strip_ids(config.cache))

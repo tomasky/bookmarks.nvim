@@ -68,6 +68,7 @@ require('bookmarks').setup {
     map("n","mp",bm.bookmark_prev) -- jump to previous mark in local buffer
     map("n","ml",bm.bookmark_list) -- show marked file list in quickfix window
     map("n","mx",bm.bookmark_clear_all) -- removes all bookmarks
+    map("n","mr",bm.bookmark_reload) -- re-read bookmarks from the save file
   end
 }
 ```
