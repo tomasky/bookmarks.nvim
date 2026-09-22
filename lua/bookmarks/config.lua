@@ -19,6 +19,10 @@ M.schema = {
     type = "string",
     default = ".bms",
   },
+  format = {
+    type = "string",
+    default = "json",
+  },
   save_on_exit = {
     type = "boolean",
     default = true,

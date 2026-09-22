@@ -21,6 +21,12 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
     a `.bms` file there; its bookmarks are stored with paths relative to that
     directory, so they can be committed and survive the project being moved
   - running `:BookmarkScope` again deletes the file and its bookmarks
+- store the files as JSON or MessagePack
+  - `format = "mpack"` uses Neovim's own MessagePack codec: smaller files and a
+    decoder that does not scan text, at the cost of them no longer being
+    readable, diffable or hand-editable
+  - either format is read whichever one is configured, so changing the option
+    never loses an existing file
 - search marks with Telescope
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
   - press `<C-d>` to delete the selected bookmark
@@ -63,6 +69,7 @@ require('bookmarks').setup {
   -- sign_priority = 8,  --set bookmark sign priority to cover other sign
   save_file = vim.fn.expand "$HOME/.bookmarks", -- bookmarks save file path
   scope_file = ".bms", -- per-project bookmarks file created by :BookmarkScope
+  format = "json", -- store the files as "json" or "mpack" (MessagePack)
   save_on_exit = true, -- write the save file on exit; set false to control saving yourself
   auto_close_list = false, -- close the quickfix window after jumping to a bookmark
   qf_position = "bottom", -- where the quickfix window opens: "bottom" or "right"

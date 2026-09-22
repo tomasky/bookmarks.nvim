@@ -1,5 +1,6 @@
 local config = require("bookmarks.config").config
 local schema = require("bookmarks.config").schema
+local codec = require("bookmarks.codec")
 local uv = vim.loop
 local Signs = require("bookmarks.signs")
 local utils = require("bookmarks.util")
@@ -698,7 +699,7 @@ function M.loadBookmarks(opts)
 
   local function read_global(data)
     if data then
-      config.cache = vim.json.decode(data)
+      config.cache = codec.decode(data) or { data = {} }
       config.marks[config.save_file] = data
       -- The cache was replaced wholesale, so drop every cached tick: the
       -- positions on screen no longer correspond to what is in memory.
@@ -779,13 +780,10 @@ ensure_scope = function(root, cb)
       reading[root] = nil
       -- A scope file created by hand may be empty; treat that as "no
       -- bookmarks" rather than blowing up on a decode error.
-      local ok, decoded = pcall(vim.json.decode, data)
-      if not ok or type(decoded) ~= "table" then
-        decoded = {}
-      end
+      local decoded = codec.decode(data) or { data = {} }
       -- Scope entries win over the global file for the same path: a file
       -- inside a scope keeps all of its bookmarks there.
-      for rel, marks in pairs(decoded.data or {}) do
+      for rel, marks in pairs(decoded.data) do
         config.cache.data[root .. "/" .. rel] = marks
       end
       config.marks[path] = data
@@ -807,7 +805,7 @@ end
 
 --- Write one bookmarks file, skipping it when its content is unchanged.
 local function write_one(path, data)
-  local encoded = vim.json.encode({ data = data })
+  local encoded = codec.encode({ data = data })
   if config.marks[path] ~= encoded then
     utils.write_file(path, encoded)
     config.marks[path] = encoded
@@ -868,8 +866,8 @@ local function flush()
       -- looking at -- and the file fills in the files memory has never seen.
       local disk = utils.read_file_sync(path)
       if disk then
-        local ok, decoded = pcall(vim.json.decode, disk)
-        for rel, marks in pairs(ok and type(decoded) == "table" and decoded.data or {}) do
+        local decoded = codec.decode(disk)
+        for rel, marks in pairs(decoded and decoded.data or {}) do
           if bucket[rel] == nil then
             bucket[rel] = marks
           end
