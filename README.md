@@ -13,6 +13,14 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
   - off by default; set `virt_text = true` or call `require('bookmarks').toggle_virt_text()`
 - open bookmarks in a quickfix list
   - set `auto_close_list = true` to close the list after jumping to a bookmark
+  - set `qf_position = "right"` to open it as a vertical split instead of at
+    the bottom
+  - bookmarks belonging to the current project's scope are listed first
+- keep a project's bookmarks inside the project
+  - `:BookmarkScope` turns the current file's directory into a scope and writes
+    a `.bms` file there; its bookmarks are stored with paths relative to that
+    directory, so they can be committed and survive the project being moved
+  - running `:BookmarkScope` again deletes the file and its bookmarks
 - search marks with Telescope
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
   - press `<C-d>` to delete the selected bookmark
@@ -54,8 +62,10 @@ Here is an example with most of the default settings:
 require('bookmarks').setup {
   -- sign_priority = 8,  --set bookmark sign priority to cover other sign
   save_file = vim.fn.expand "$HOME/.bookmarks", -- bookmarks save file path
+  scope_file = ".bms", -- per-project bookmarks file created by :BookmarkScope
   save_on_exit = true, -- write the save file on exit; set false to control saving yourself
   auto_close_list = false, -- close the quickfix window after jumping to a bookmark
+  qf_position = "bottom", -- where the quickfix window opens: "bottom" or "right"
   virt_text = false, -- show annotations as virtual text at the end of the line
   keywords =  {
     ["@t"] = "☑️ ", -- mark annotation startswith @t ,signs this icon as `Todo`
@@ -76,6 +86,7 @@ require('bookmarks').setup {
     map("n","mx",bm.bookmark_clear_all) -- removes all bookmarks
     map("n","mr",bm.bookmark_reload) -- reload bookmarks, drop dead entries, and save
     map("n","mt",bm.toggle_virt_text) -- toggle inline annotation text
+    map("n","ms",bm.toggle_scope) -- toggle a project-local scope file
   end
 }
 ```

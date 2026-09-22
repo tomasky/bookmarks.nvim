@@ -13,6 +13,10 @@ local next_id = 0
 local path_cache = {} -- [bufnr] = realpath | false (known to have none)
 local synced_tick = {} -- [bufnr] = changedtick at the last resync
 local tracked = {} -- [bufnr] = true, buffers whose signs we manage
+local scope_cache = {} -- [dir] = scope root | false (known to have none)
+local scope_of = {} -- [file] = scope root | false
+local loaded = {} -- [root] = true, its scope file is in the cache
+local reading = {} -- [root] = true, a read of its scope file is in flight
 
 local function alloc_id()
   next_id = next_id + 1
@@ -90,25 +94,77 @@ local function sign_of(lnum, mark)
   }
 end
 
---- Copy the cache without the transient extmark ids, so the on-disk JSON
---- format stays exactly as it was before this refactor.
-local function strip_ids(cache)
-  local out = { data = {} }
-  for file, marks in pairs(cache.data or {}) do
-    local copy = {}
-    for lnum, v in pairs(marks) do
-      copy[lnum] = { m = v.m, a = v.a }
-    end
-    out.data[file] = copy
+--- Copy a file's marks without the transient extmark ids, so the on-disk JSON
+--- format stays exactly as it was before the extmark refactor.
+local function strip_marks(marks)
+  local copy = {}
+  for lnum, v in pairs(marks) do
+    copy[lnum] = { m = v.m, a = v.a }
   end
-  return out
+  return copy
+end
+
+--- Directory of the scope a file belongs to, or nil when it is in none. Walks
+--- up from the file's directory looking for a scope file and stops at the
+--- first hit -- nearest wins, with no special cases.
+---
+--- Both levels are memoized, so the cost is one stat for a directory never
+--- seen before and one table lookup after that:
+---   scope_cache[dir] answers "nearest scope at or above dir", including
+---   `false` for "none", which stops unscoped files from re-walking to the
+---   filesystem root on every call. scope_of[file] then skips even the
+---   dirname() string work that flush() and bookmark_list() would otherwise
+---   repeat for every file on every call.
+local function scope_root(file)
+  local hit = scope_of[file]
+  if hit ~= nil then
+    return hit or nil
+  end
+
+  local visited = {}
+  local result = false
+  local path = utils.dirname(file)
+  while path do
+    local cached = scope_cache[path]
+    if cached ~= nil then
+      result = cached
+      break
+    end
+    if utils.path_exists(path .. "/" .. config.scope_file) then
+      result = path
+      break
+    end
+    visited[#visited + 1] = path
+    path = utils.dirname(path)
+  end
+
+  for _, p in ipairs(visited) do
+    scope_cache[p] = result
+  end
+  scope_of[file] = result
+  return result or nil
+end
+
+--- Forget everything memoized about scopes. Needed whenever scope files appear
+--- or disappear, and before re-reading the global file: a cached "no scope
+--- here" would stick forever, and a scope still marked loaded after the cache
+--- was replaced wholesale would be written back as empty.
+local function clear_scope_cache()
+  scope_cache = {}
+  scope_of = {}
+  loaded = {}
+  reading = {}
 end
 
 local resync
 local attach_to_buffer
+local ensure_scope
 
 M.setup = function()
   signs = Signs.new(config.signs)
+  -- [path] = the JSON last written there, so an unchanged file is never
+  -- rewritten. Internal state, deliberately not part of the config schema.
+  config.marks = {}
 end
 
 M.detach = function(bufnr, keep_signs)
@@ -312,11 +368,36 @@ M.bookmark_list = function()
   M.prune_dead(function()
     local marklist = {}
     for file, marks in pairs(config.cache.data) do
+      -- Scope bookmarks belong to the project you are actually in, so they are
+      -- listed first. Memoized, so this is a table lookup per file.
+      local scoped = scope_root(file) ~= nil
       for lnum, v in pairs(marks) do
-        table.insert(marklist, { filename = file, lnum = lnum, text = v.m .. "|" .. (v.a or "") })
+        table.insert(marklist, {
+          filename = file,
+          lnum = tonumber(lnum),
+          text = v.m .. "|" .. (v.a or ""),
+          scoped = scoped,
+        })
       end
     end
-    utils.setqflist(marklist, { close_on_select = config.auto_close_list })
+    table.sort(marklist, function(a, b)
+      if a.scoped ~= b.scoped then
+        return a.scoped
+      end
+      if a.filename ~= b.filename then
+        return a.filename < b.filename
+      end
+      return a.lnum < b.lnum
+    end)
+    -- scoped was only there to drive the sort; keep the items to the fields
+    -- setqflist() actually understands.
+    for _, entry in ipairs(marklist) do
+      entry.scoped = nil
+    end
+    utils.setqflist(marklist, {
+      close_on_select = config.auto_close_list,
+      position = config.qf_position,
+    })
   end)
 end
 
@@ -440,6 +521,12 @@ M.refresh = function(bufnr, skip_resync)
     try_resync(bufnr)
   end
   paint(bufnr, file)
+  -- First time we see a file inside a scope, pull that scope's bookmarks in.
+  -- Memoized, so this is a table lookup once the directory is known.
+  local root = scope_root(file)
+  if root and not loaded[root] then
+    ensure_scope(root)
+  end
 end
 
 --- How long prune_dead waits for its async existence checks before giving up.
@@ -535,6 +622,43 @@ function M.sync_all()
   end
 end
 
+--- Paint every loaded buffer, pull in the current buffer's scope, then run the
+--- prune/save pass when asked. Deferred via vim.schedule because every caller
+--- runs inside a libuv callback, where the buffer API is off limits.
+local function after_load(prune_and_save)
+  vim.schedule(function()
+    -- The read is async, so any buffer opened before it finished (the file
+    -- nvim started with, or anything read during startup) is still blank.
+    -- paint() rather than refresh(): the cache was replaced wholesale, so
+    -- there is nothing meaningful to read back from the old extmarks.
+    for _, bufnr in ipairs(api.nvim_list_bufs()) do
+      if api.nvim_buf_is_loaded(bufnr) then
+        local file = file_of(bufnr)
+        if file then
+          paint(bufnr, file)
+        end
+      end
+    end
+    local function finish()
+      if prune_and_save then
+        -- The prune lives on this path only (bookmark_reload), never on the
+        -- exit path. Its sign cleanup also removes the signs just painted for
+        -- the dead files.
+        M.saveBookmarks({ prune = true })
+      end
+    end
+    -- A scope file is the more specific store, so it is read after the global
+    -- one and wins for any path they both mention.
+    local file = file_of(current_buf())
+    local root = file and scope_root(file)
+    if root then
+      ensure_scope(root, finish)
+    else
+      finish()
+    end
+  end)
+end
+
 --- Read the bookmarks file and repaint every loaded buffer.
 --- @param opts table|nil `prune_and_save` additionally drops entries whose
 ---   file is gone and writes the cleaned cache back. Only bookmark_reload
@@ -543,37 +667,18 @@ end
 function M.loadBookmarks(opts)
   local prune_and_save = opts and opts.prune_and_save
   if not utils.path_exists(config.save_file) then
+    -- No global file yet, but the project may still carry a scope file: a
+    -- fresh clone, or someone who keeps only project-local bookmarks.
+    after_load(prune_and_save)
     return
   end
   utils.read_file(config.save_file, function(data)
     config.cache = vim.json.decode(data)
-    config.marks = data
+    config.marks[config.save_file] = data
     -- The cache was replaced wholesale, so drop every cached tick: the
     -- positions on screen no longer correspond to what is in memory.
     synced_tick = {}
-    -- The read is async, so any buffer that was opened before it finished
-    -- (the file nvim started with, or anything read during startup) is still
-    -- blank. Paint them all now that the cache is actually populated.
-    -- paint() rather than refresh(): the cache was just replaced wholesale,
-    -- so there is nothing meaningful to read back from the old extmarks.
-    -- Deferred via vim.schedule: this callback runs inside a libuv callback,
-    -- which is not a safe place to call the buffer API.
-    vim.schedule(function()
-      for _, bufnr in ipairs(api.nvim_list_bufs()) do
-        if api.nvim_buf_is_loaded(bufnr) then
-          local file = file_of(bufnr)
-          if file then
-            paint(bufnr, file)
-          end
-        end
-      end
-      if prune_and_save then
-        -- The prune lives on this path only (bookmark_reload), never on the
-        -- exit path. Its sign cleanup also removes the signs just painted for
-        -- the dead files.
-        M.saveBookmarks({ prune = true })
-      end
-    end)
+    after_load(prune_and_save)
   end)
 end
 
@@ -583,15 +688,128 @@ end
 --- checkout) and cleans up after a renamed or moved directory. Does nothing
 --- if the save file is missing.
 function M.bookmark_reload()
+  -- Forget every memoized scope. The global file is about to replace the
+  -- cache wholesale, so a scope still marked loaded would have no marks left
+  -- in memory and would be rewritten as empty -- and scope files added or
+  -- removed outside this nvim instance have to be discovered again.
+  clear_scope_cache()
   M.loadBookmarks({ prune_and_save = true })
 end
 
---- Write the cache out, skipping the write when nothing changed.
+--- Path of the scope file belonging to `root`.
+local function scope_path(root)
+  return root .. "/" .. config.scope_file
+end
+
+--- Read a scope's file into the cache the first time we touch it. The read is
+--- async, so `cb` fires once the cache holds it and the loaded buffers have
+--- been repainted.
+ensure_scope = function(root, cb)
+  if loaded[root] or reading[root] then
+    if cb then
+      cb()
+    end
+    return
+  end
+  local path = scope_path(root)
+  if not utils.path_exists(path) then
+    if cb then
+      cb()
+    end
+    return
+  end
+  -- Marked as loaded only once the read lands. A scope still being read must
+  -- not be treated as loaded by flush(), or quitting mid-read would rewrite
+  -- its file as empty and throw its bookmarks away.
+  reading[root] = true
+  utils.read_file(path, function(data)
+    -- Hop back to the main loop before touching the cache or the buffer API.
+    -- The scope may also have been switched off while the read was in flight,
+    -- in which case reading[root] is gone and the result is dropped.
+    vim.schedule(function()
+      if not reading[root] then
+        if cb then
+          cb()
+        end
+        return
+      end
+      reading[root] = nil
+      -- A scope file created by hand may be empty; treat that as "no
+      -- bookmarks" rather than blowing up on a decode error.
+      local ok, decoded = pcall(vim.json.decode, data)
+      if not ok or type(decoded) ~= "table" then
+        decoded = {}
+      end
+      -- Scope entries win over the global file for the same path: a file
+      -- inside a scope keeps all of its bookmarks there.
+      for rel, marks in pairs(decoded.data or {}) do
+        config.cache.data[root .. "/" .. rel] = marks
+      end
+      config.marks[path] = data
+      loaded[root] = true
+      for _, bufnr in ipairs(api.nvim_list_bufs()) do
+        if api.nvim_buf_is_loaded(bufnr) then
+          local file = file_of(bufnr)
+          if file then
+            paint(bufnr, file)
+          end
+        end
+      end
+      if cb then
+        cb()
+      end
+    end)
+  end)
+end
+
+--- Write one bookmarks file, skipping it when its content is unchanged.
+local function write_one(path, data)
+  local encoded = vim.json.encode({ data = data })
+  if config.marks[path] ~= encoded then
+    utils.write_file(path, encoded)
+    config.marks[path] = encoded
+  end
+end
+
+--- Write the cache out, split between the global file and one file per scope.
+--- Routing is recomputed on every flush, which is what makes turning a scope
+--- on or off move its bookmarks with no migration code.
 local function flush()
-  local data = vim.json.encode(strip_ids(config.cache))
-  if config.marks ~= data then
-    utils.write_file(config.save_file, data)
-    config.marks = data
+  local global = {}
+  local scopes = {}
+  for file, marks in pairs(config.cache.data) do
+    local root = scope_root(file)
+    if root then
+      local bucket = scopes[root]
+      if not bucket then
+        bucket = {}
+        scopes[root] = bucket
+      end
+      -- Paths are stored relative to the scope root, so a scope file survives
+      -- its project being moved.
+      bucket[file:sub(#root + 2)] = strip_marks(marks)
+    else
+      global[file] = strip_marks(marks)
+    end
+  end
+
+  write_one(config.save_file, global)
+
+  -- Every loaded scope gets written, not just the ones still holding marks: a
+  -- scope whose bookmarks were all deleted has to be blanked rather than left
+  -- with stale entries. A scope file deleted outside nvim is dropped instead
+  -- of being recreated.
+  for root in pairs(loaded) do
+    scopes[root] = scopes[root] or {}
+  end
+  for root, bucket in pairs(scopes) do
+    local path = scope_path(root)
+    if utils.path_exists(path) then
+      write_one(path, bucket)
+    else
+      loaded[root] = nil
+      config.marks[path] = nil
+    end
   end
 end
 
@@ -620,6 +838,70 @@ function M.bookmark_clear_all()
     signs:remove(bufnr)
   end
   M.saveBookmarks()
+end
+
+--- Turn a project-local scope on or off for the current buffer's directory.
+---
+--- On: create the scope file. The next flush routes this directory's bookmarks
+--- into it, so bookmarks that were global move across on their own.
+--- Off: drop the scope's bookmarks and delete its file.
+function M.toggle_scope()
+  local file = file_of(current_buf())
+  if not file then
+    utils.warn("bookmarks: the current buffer has no file")
+    return
+  end
+  local root = utils.dirname(file)
+  if not root then
+    utils.warn("bookmarks: cannot scope %s", file)
+    return
+  end
+  local path = scope_path(root)
+
+  if not utils.path_exists(path) then
+    -- Create the file for real, and synchronously: scope_root() has to see it
+    -- before flush() can route anything into it.
+    local ok, err = utils.write_file_sync(path, '{"data":{}}')
+    if not ok then
+      utils.warn("bookmarks: cannot create %s (%s)", path, err or "unknown error")
+      return
+    end
+    clear_scope_cache()
+    loaded[root] = true
+    flush()
+    utils.warn("bookmarks: scope on for %s", root)
+    return
+  end
+
+  -- Collect before clearing the cache: afterwards we can no longer tell which
+  -- files belonged to this root.
+  local dropped = nil
+  for f in pairs(config.cache.data) do
+    if scope_root(f) == root then
+      dropped = dropped or {}
+      dropped[f] = true
+    end
+  end
+  if dropped then
+    for f in pairs(dropped) do
+      config.cache.data[f] = nil
+    end
+    for bufnr in pairs(tracked) do
+      local buf_file = file_of(bufnr)
+      if buf_file and dropped[buf_file] then
+        signs:remove(bufnr)
+      end
+    end
+  end
+
+  clear_scope_cache()
+  -- Clearing the cache above also cancels any read still in flight, so its
+  -- result is dropped instead of resurrecting the bookmarks we just discarded.
+  config.marks[path] = nil
+  -- A scope is turned off by deleting its file, so its bookmarks go with it.
+  utils.remove_file(path)
+  flush()
+  utils.warn("bookmarks: scope off for %s", root)
 end
 
 return M

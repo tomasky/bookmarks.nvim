@@ -113,6 +113,24 @@ M.write_file = function(path, content)
   end)
 end
 
+--- Delete a file, ignoring "it was not there". Used when a scope is turned off.
+function M.remove_file(path)
+  uv.fs_unlink(path, function() end)
+end
+
+--- Write `content` to `path`, synchronously. Used when a scope is switched on:
+--- the routing that runs immediately afterwards has to see the file on disk,
+--- and an async write would not have landed yet.
+function M.write_file_sync(path, content)
+  local fd, err = uv.fs_open(path, "w", 438)
+  if not fd then
+    return false, err
+  end
+  uv.fs_write(fd, content, -1)
+  uv.fs_close(fd)
+  return true
+end
+
 M.read_file = function(path, callback)
   uv.fs_open(path, "r", 438, function(err, fd)
     assert(not err, err)
@@ -148,6 +166,13 @@ function M.lazy(fn)
   end
 end
 
+--- Where the quickfix window is opened. Anything unrecognized opens at the
+--- bottom.
+local QF_OPEN = {
+  bottom = "botright copen",
+  right = "vertical botright copen",
+}
+
 function M.setqflist(content, opts)
   if type(opts) == "string" then
     opts = { cwd = opts }
@@ -161,7 +186,10 @@ function M.setqflist(content, opts)
   if not opts.open then
     return
   end
-  vim.cmd([[copen]])
+  -- copen only honours its position modifiers when it has to create the
+  -- window, so an already-open one is closed first.
+  vim.cmd([[silent! cclose]])
+  vim.cmd(QF_OPEN[opts.position] or QF_OPEN.bottom)
   if opts.close_on_select then
     local winid = vim.fn.getqflist({ winid = true }).winid
     local bufnr = winid ~= 0 and vim.api.nvim_win_get_buf(winid) or nil

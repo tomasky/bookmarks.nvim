@@ -75,6 +75,9 @@ M.setup = void(function(cfg)
   nvim.augroup("bookmarks")
   autocmd("VimLeavePre", M.detach_all)
   autocmd("ColorScheme", hl.setup_highlights)
+  nvim.command("BookmarkScope", actions.toggle_scope, {
+    desc = "Toggle a project-local bookmarks scope for the current file's directory",
+  })
   -- Signs follow their extmarks automatically while editing, so no
   -- TextChanged autocmd is needed. Only rebuild when a buffer is (re)loaded
   -- or regains focus, and drop the memoized path when the file is renamed

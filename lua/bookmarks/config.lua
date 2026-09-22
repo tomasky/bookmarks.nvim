@@ -15,6 +15,10 @@ M.schema = {
     type = "string",
     default = vim.fn.expand("$HOME/.bookmarks"),
   },
+  scope_file = {
+    type = "string",
+    default = ".bms",
+  },
   save_on_exit = {
     type = "boolean",
     default = true,
@@ -22,6 +26,10 @@ M.schema = {
   auto_close_list = {
     type = "boolean",
     default = false,
+  },
+  qf_position = {
+    type = "string",
+    default = "bottom",
   },
   sign_priority = {
     type = "number",
