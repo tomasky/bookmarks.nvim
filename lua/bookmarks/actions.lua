@@ -19,6 +19,7 @@ local scope_of = {} -- [file] = scope root | false
 local loaded = {} -- [root] = true, its scope file is in the cache
 local reading = {} -- [root] = true, a read of its scope file is in flight
 local dirty = false -- true when config.cache.data holds changes not yet written
+local digests = {} -- [path] = hash of the text last written there
 
 local function alloc_id()
   next_id = next_id + 1
@@ -717,6 +718,9 @@ function M.loadBookmarks(opts)
   local function read_global(data)
     if data then
       config.cache = codec.decode(data) or { data = {} }
+      -- What is on disk is what the cache now holds, so the next save must not
+      -- rewrite this file just because it was loaded.
+      digests[config.save_file] = vim.fn.sha256(data)
       -- The cache was replaced wholesale, so drop every cached tick: the
       -- positions on screen no longer correspond to what is in memory.
       synced_tick = {}
@@ -807,6 +811,9 @@ ensure_scope = function(root, cb)
       for rel, marks in pairs(decoded.data) do
         config.cache.data[root .. "/" .. rel] = marks
       end
+      -- Same reason as the global file: these marks came off the disk, so the
+      -- next save has nothing to write here unless something changes.
+      digests[path] = vim.fn.sha256(data)
       loaded[root] = true
       for _, bufnr in ipairs(api.nvim_list_bufs()) do
         if api.nvim_buf_is_loaded(bufnr) then
@@ -823,12 +830,22 @@ ensure_scope = function(root, cb)
   end)
 end
 
---- Write one bookmarks file. There is no content comparison here: flush() only
---- runs when something changed, so a file that did not change is simply
---- rewritten with what it already holds, which costs an async write and
---- nothing else.
+--- Write one bookmarks file, unless it already holds this content. The
+--- comparison is what keeps a save from touching files it has no business
+--- touching: changing one project's bookmarks must not rewrite every other
+--- project's scope file.
+---
+--- A hash stands in for the text itself, so the guard costs a few dozen bytes
+--- per file instead of a second copy of everything. `dirty` cannot do this job
+--- -- it is one bit for the whole cache, and answers a different question
+--- ("is there anything to write at all").
 local function write_one(path, data)
-  utils.write_file(path, codec.encode({ data = data }))
+  local encoded = codec.encode({ data = data })
+  local digest = vim.fn.sha256(encoded)
+  if digests[path] ~= digest then
+    utils.write_file(path, encoded)
+    digests[path] = digest
+  end
 end
 
 --- Write the cache out, split between the global file and one file per scope.
@@ -840,10 +857,10 @@ end
 --- scope's file the next time it is written, whether or not this session had
 --- read the scope before.
 ---
---- A flush with nothing pending returns immediately. `dirty` is cleared by the
---- last flush, so it means "config.cache.data holds changes not yet written",
---- and a session that only looked at its bookmarks -- the common one -- never
---- encodes or writes anything at all.
+--- A flush with nothing pending returns immediately. `dirty` is cleared at the
+--- end of a flush, so it means "config.cache.data holds changes not yet
+--- written", and a session that only looked at its bookmarks -- the common one
+--- -- never encodes or writes anything at all.
 local function flush()
   if not dirty then
     return
@@ -880,6 +897,7 @@ local function flush()
     local path = scope_path(root)
     if not utils.path_exists(path) then
       loaded[root] = nil
+      digests[path] = nil
     elseif loaded[root] then
       -- Read into this session, so the cache is the whole story for this
       -- scope and the file can be replaced outright -- which is how a deleted
@@ -957,13 +975,15 @@ function M.toggle_scope()
   if not utils.path_exists(path) then
     -- Create the file for real, and synchronously: scope_root() has to see it
     -- before flush() can route anything into it.
-    local ok, err = utils.write_file_sync(path, codec.encode({ data = {} }))
+    local empty = codec.encode({ data = {} })
+    local ok, err = utils.write_file_sync(path, empty)
     if not ok then
       utils.warn("bookmarks: cannot create %s (%s)", path, err or "unknown error")
       return
     end
     clear_scope_cache()
     loaded[root] = true
+    digests[path] = vim.fn.sha256(empty)
     -- Routing changed, so this is a write even though no bookmark did.
     dirty = true
     flush()
@@ -997,6 +1017,7 @@ function M.toggle_scope()
   -- result is dropped instead of resurrecting the bookmarks we just discarded.
   -- A scope is turned off by deleting its file, so its bookmarks go with it.
   utils.remove_file(path)
+  digests[path] = nil
   -- The dropped bookmarks are a change like any other, and the routing moved.
   dirty = true
   flush()
