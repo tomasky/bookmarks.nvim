@@ -20,6 +20,7 @@ local loaded = {} -- [root] = true, its scope file is in the cache
 local reading = {} -- [root] = true, a read of its scope file is in flight
 local dirty = false -- true when config.cache.data holds changes not yet written
 local digests = {} -- [path] = hash of the text last written there
+local global_broken = false -- true when the global file is there but unreadable
 
 local function alloc_id()
   next_id = next_id + 1
@@ -717,18 +718,31 @@ function M.loadBookmarks(opts)
 
   local function read_global(data)
     if data then
-      config.cache = codec.decode(data) or { data = {} }
-      -- What is on disk is what the cache now holds, so the next save must not
-      -- rewrite this file just because it was loaded. Seeding the digest means
-      -- calling vim.fn, which this libuv callback is not allowed to do, so it
-      -- happens on the main loop -- any time before the next save is soon
-      -- enough.
+      local decoded = codec.decode(data)
+      if decoded then
+        config.cache = decoded
+        -- The cache was replaced wholesale, so drop every cached tick: the
+        -- positions on screen no longer correspond to what is in memory.
+        synced_tick = {}
+      end
+      -- Both seeding the digest and warning need vim.fn / vim.notify, which
+      -- this libuv callback is not allowed to call. Neither is urgent, so they
+      -- happen on the main loop.
       vim.schedule(function()
-        digests[config.save_file] = vim.fn.sha256(data)
+        if decoded then
+          -- What is on disk is what the cache now holds, so the next save must
+          -- not rewrite this file just because it was loaded.
+          digests[config.save_file] = vim.fn.sha256(data)
+          global_broken = false
+        else
+          -- The file is there but its contents did not decode. The cache is
+          -- still empty, so writing it back would replace every bookmark with
+          -- nothing -- silent total loss. Leave the file alone until someone
+          -- fixes or removes it, and say so.
+          global_broken = true
+          utils.warn("bookmarks: cannot read %s, leaving it untouched", config.save_file)
+        end
       end)
-      -- The cache was replaced wholesale, so drop every cached tick: the
-      -- positions on screen no longer correspond to what is in memory.
-      synced_tick = {}
     end
     -- A scope read that landed before this one merged its marks into the cache
     -- that has just been thrown away, while leaving the scope marked as
@@ -889,7 +903,9 @@ local function flush()
     end
   end
 
-  write_one(config.save_file, global)
+  if not global_broken then
+    write_one(config.save_file, global)
+  end
 
   -- Every loaded scope gets written, not just the ones still holding marks: a
   -- scope whose bookmarks were all deleted has to be blanked rather than left
