@@ -114,8 +114,11 @@ M.write_file = function(path, content)
 end
 
 --- Delete a file, ignoring "it was not there". Used when a scope is turned off.
+--- Synchronous on purpose: the flush that runs immediately afterwards has to
+--- see the file gone, or it would treat the scope as still existing and write
+--- its bookmarks straight back.
 function M.remove_file(path)
-  uv.fs_unlink(path, function() end)
+  uv.fs_unlink(path)
 end
 
 --- Write `content` to `path`, synchronously. Used when a scope is switched on:
@@ -129,6 +132,32 @@ function M.write_file_sync(path, content)
   uv.fs_write(fd, content, -1)
   uv.fs_close(fd)
   return true
+end
+
+--- Read `path`, synchronously. Returns its contents, "" for an empty file, or
+--- nil when it could not be read. Used by flush() to pull in a scope file that
+--- was never read into this session: the merge has to happen before the write,
+--- and there is no async way to guarantee that ordering.
+function M.read_file_sync(path)
+  local fd = uv.fs_open(path, "r", 438)
+  if not fd then
+    return nil
+  end
+  local stat = uv.fs_fstat(fd)
+  if not stat then
+    uv.fs_close(fd)
+    return nil
+  end
+  local data = ""
+  if stat.size > 0 then
+    data = uv.fs_read(fd, stat.size, 0)
+    if not data then
+      uv.fs_close(fd)
+      return nil
+    end
+  end
+  uv.fs_close(fd)
+  return data
 end
 
 M.read_file = function(path, callback)

@@ -817,17 +817,17 @@ end
 --- Write the cache out, split between the global file and one file per scope.
 --- Routing is recomputed on every flush, which is what makes turning a scope
 --- on or off move its bookmarks with no migration code.
+---
+--- Where a bookmark goes is decided by scope_root() alone. Nothing is ever
+--- relayed through the global file, so a mark made inside a scope is in that
+--- scope's file the next time it is written, whether or not this session had
+--- read the scope before.
 local function flush()
   local global = {}
   local scopes = {}
   for file, marks in pairs(config.cache.data) do
     local root = scope_root(file)
-    -- Only a scope whose file was read into this session may be written to.
-    -- Otherwise the cache holds at best a partial view of that file, and
-    -- writing would truncate it to just that view. Such marks go to the global
-    -- file instead -- which is fully loaded, so nothing is lost -- and the next
-    -- flush after the scope is read moves them across.
-    if root and loaded[root] then
+    if root then
       local bucket = scopes[root]
       if not bucket then
         bucket = {}
@@ -852,11 +852,30 @@ local function flush()
   end
   for root, bucket in pairs(scopes) do
     local path = scope_path(root)
-    if utils.path_exists(path) then
-      write_one(path, bucket)
-    else
+    if not utils.path_exists(path) then
       loaded[root] = nil
       config.marks[path] = nil
+    elseif loaded[root] then
+      -- Read into this session, so the cache is the whole story for this
+      -- scope and the file can be replaced outright -- which is how a deleted
+      -- bookmark stays deleted.
+      write_one(path, bucket)
+    else
+      -- Never read into this session, so the cache only knows about the files
+      -- this session touched. Everything else has to come from the file:
+      -- replacing it would truncate the scope down to whatever happens to be
+      -- in memory. Per file, memory wins -- it is what the user has been
+      -- looking at -- and the file fills in the files memory has never seen.
+      local disk = utils.read_file_sync(path)
+      if disk then
+        local ok, decoded = pcall(vim.json.decode, disk)
+        for rel, marks in pairs(ok and type(decoded) == "table" and decoded.data or {}) do
+          if bucket[rel] == nil then
+            bucket[rel] = marks
+          end
+        end
+        write_one(path, bucket)
+      end
     end
   end
 end
@@ -894,14 +913,14 @@ end
 --- into it, so bookmarks that were global move across on their own.
 --- Off: drop the scope's bookmarks and delete its file.
 function M.toggle_scope()
+  -- With no file open there is no buffer directory to work from, so fall back
+  -- to nvim's working directory: started in a directory that already carries a
+  -- scope file, `:BookmarkScope` turns that scope off; anywhere else it creates
+  -- one.
   local file = file_of(current_buf())
-  if not file then
-    utils.warn("bookmarks: the current buffer has no file")
-    return
-  end
-  local root = utils.dirname(file)
+  local root = file and utils.dirname(file) or uv.cwd()
   if not root then
-    utils.warn("bookmarks: cannot scope %s", file)
+    utils.warn("bookmarks: cannot scope %s", file or "the current directory")
     return
   end
   local path = scope_path(root)
