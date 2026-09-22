@@ -79,9 +79,10 @@ M.setup = void(function(cfg)
     desc = "Toggle a project-local bookmarks scope for the current file's directory",
   })
   -- Signs follow their extmarks automatically while editing, so no
-  -- TextChanged autocmd is needed. Only rebuild when a buffer is (re)loaded
-  -- or regains focus, and drop the memoized path when the file is renamed
-  -- or written under a new name.
+  -- TextChanged autocmd is needed, and regaining focus changes nothing, so
+  -- neither is FocusGained. Only rebuild when a buffer is (re)loaded, and
+  -- drop the memoized path when the file is renamed or written under a new
+  -- name.
   nvim.autocmd({ "BufFilePost", "BufWritePost" }, {
     group = "bookmarks",
     callback = function(args)
@@ -91,7 +92,6 @@ M.setup = void(function(cfg)
   on_or_after_vimenter(function()
     hl.setup_highlights()
     M.attach()
-    autocmd("FocusGained", actions.refresh)
     autocmd("BufReadPost", actions.refresh)
   end)
 end)

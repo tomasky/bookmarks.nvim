@@ -30,8 +30,12 @@ else
   is_unix = binfmt ~= "dll"
 end
 
+--- Precompiled by the assignment below path_sep, so the scope walk's
+--- per-directory dirname() does not rebuild the same pattern every time.
+local dirname_pat
+
 function M.dirname(file)
-  return file:match(string.format("^(.+)%s[^%s]+", M.path_sep, M.path_sep))
+  return file:match(dirname_pat)
 end
 
 function M.file_lines(file)
@@ -43,6 +47,7 @@ function M.file_lines(file)
 end
 
 M.path_sep = package.config:sub(1, 1)
+dirname_pat = "^(.+)" .. M.path_sep .. "[^" .. M.path_sep .. "]+"
 
 function M.tmpname()
   if is_unix then

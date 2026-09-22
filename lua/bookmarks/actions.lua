@@ -55,7 +55,9 @@ local function ann_icon(ann)
   if ann:sub(1, 1) == "@" then
     return config.keywords[ann:sub(1, 2)]
   end
-  local first = vim.fn.strcharpart(ann, 0, 1)
+  -- A Lua pattern rather than vim.fn.strcharpart: the latter crosses into
+  -- Vimscript once per annotation on every repaint.
+  local first = ann:match("^[\1-\244][\128-\191]*")
   if first == "" or first == " " then
     return nil
   end
@@ -258,7 +260,9 @@ M.toggle_signs = function(value)
   else
     config.signcolumn = not config.signcolumn
   end
-  M.refresh()
+  -- Forced: the signs are current, but they have to be redrawn without a
+  -- sign column.
+  M.refresh(nil, false, true)
   return config.signcolumn
 end
 
@@ -271,8 +275,9 @@ M.toggle_virt_text = function(value)
   else
     config.virt_text = not config.virt_text
   end
+  -- Forced: the positions are current, but the inline text has to be redrawn.
   for bufnr in pairs(tracked) do
-    M.refresh(bufnr)
+    M.refresh(bufnr, false, true)
   end
   return config.virt_text
 end
@@ -521,7 +526,11 @@ local function paint(bufnr, file)
   synced_tick[bufnr] = api.nvim_buf_get_changedtick(bufnr)
 end
 
-M.refresh = function(bufnr, skip_resync)
+--- `skip_resync` says the caller (resync) already tried to read the positions
+--- back and failed, so there is nothing to read here. `force` repaints even
+--- when the signs are known to be current: the display toggles change what a
+--- sign looks like, not where it is, so they cannot rely on the guards below.
+M.refresh = function(bufnr, skip_resync, force)
   bufnr = bufnr or current_buf()
   if not api.nvim_buf_is_loaded(bufnr) then
     return
@@ -530,16 +539,33 @@ M.refresh = function(bufnr, skip_resync)
   if not file then
     return
   end
-  -- Fold in any edits the extmarks already absorbed before rebuilding, so we
-  -- never redraw signs at stale line numbers. If the signs are gone (buffer
-  -- was reloaded) this fails and we rebuild from the cached positions.
-  -- skip_resync is set by resync, which has already made that attempt.
-  if not skip_resync and synced_tick[bufnr] ~= api.nvim_buf_get_changedtick(bufnr) then
-    try_resync(bufnr)
+  -- Before the guards below, which may skip the repaint: `tracked` is what
+  -- sync_all, the display toggles and the on_detach cleanup walk, so a buffer
+  -- that is looked at but not repainted still has to be registered.
+  attach_to_buffer(bufnr)
+  -- Extmarks move themselves as the buffer is edited, so a repaint is only
+  -- needed when they are gone (buffer reloaded) or when the cache was
+  -- replaced. A successful read-back means every mark still has its extmark,
+  -- and an unchanged tick means nothing has happened since the last paint:
+  -- either way the signs on screen are already right, and painting them means
+  -- clearing and recreating every extmark for nothing.
+  local stale = true
+  if not force then
+    if skip_resync then
+      -- resync already tried and failed, so the signs have to be rebuilt.
+    elseif synced_tick[bufnr] == api.nvim_buf_get_changedtick(bufnr) then
+      stale = false
+    else
+      stale = not try_resync(bufnr)
+    end
   end
-  paint(bufnr, file)
+  if stale then
+    paint(bufnr, file)
+  end
   -- First time we see a file inside a scope, pull that scope's bookmarks in.
-  -- Memoized, so this is a table lookup once the directory is known.
+  -- Memoized, so this is a table lookup once the directory is known. Runs even
+  -- when the repaint was skipped: a file opened inside a scope has no marks in
+  -- the cache yet, which is exactly when the scope still has to be read.
   local root = scope_root(file)
   if root and not loaded[root] then
     ensure_scope(root)
