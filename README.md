@@ -94,6 +94,8 @@ require('bookmarks').setup {
     map("n","mr",bm.bookmark_reload) -- reload bookmarks, drop dead entries, and save
     map("n","mt",bm.toggle_virt_text) -- toggle inline annotation text
     map("n","ms",bm.toggle_scope) -- toggle a project-local scope file
+    map("n","tb","<Cmd>Telescope bookmarks list<CR>") -- toggle Telescope bookmarks list
+    -- map("n","bm","<Cmd>BookmarkScope<CR>") -- add or remove the current directory from the scope
   end
 }
 ```
