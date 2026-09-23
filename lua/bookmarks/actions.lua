@@ -44,6 +44,10 @@ function M.invalidate_path(bufnr)
   path_cache[bufnr] = nil
 end
 
+local function trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 --- Icon to show for an annotation. An annotation starting with "@" uses the
 --- configured keyword table ("@t" -> checkbox, ...); anything else gives up
 --- its first character, so plain letters and emoji both work as icons.
@@ -53,7 +57,13 @@ local function ann_icon(ann)
     return nil
   end
   if ann:sub(1, 1) == "@" then
-    return config.keywords[ann:sub(1, 2)]
+    -- Trimmed like ann_text does. A sign is at most two cells wide, and the
+    -- configured value is an icon plus a separating space: "☑️ " is three
+    -- cells (U+FE0F widens the checkbox), which nvim_buf_set_extmark rejects
+    -- as an invalid sign_text. An unknown keyword stays nil, so the mark
+    -- falls back to the default sign.
+    local icon = config.keywords[ann:sub(1, 2)]
+    return icon and trim(icon) or nil
   end
   -- A Lua pattern rather than vim.fn.strcharpart: the latter crosses into
   -- Vimscript once per annotation on every repaint.
@@ -65,10 +75,6 @@ local function ann_icon(ann)
 end
 
 M.ann_icon = ann_icon
-
-local function trim(s)
-  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
-end
 
 --- Inline text to show next to a bookmarked line, or nil when there is
 --- nothing worth showing. A keyword annotation renders as its icon followed
