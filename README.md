@@ -27,7 +27,7 @@ A Bookmarks Plugin With Global File Store For Neovim Written In Lua.
     readable, diffable or hand-editable
   - either format is read whichever one is configured, so changing the option
     never loses an existing file
-- search marks with Telescope
+- search marks with Telescope or Snacks Picker.
   ![](http://raw.github.com/tomasky/tomasky/main/bookmarksfeatures1.png)
   - press `<C-d>` to delete the selected bookmark
 
@@ -83,6 +83,7 @@ require('bookmarks').setup {
   },
   on_attach = function(bufnr)
     local bm = require "bookmarks"
+    local snacks = require("bookmarks.snacks")
     local map = vim.keymap.set
     map("n","mm",bm.bookmark_toggle) -- add or remove bookmark at current line
     map("n","mi",bm.bookmark_ann) -- add or edit mark annotation at current line
@@ -95,6 +96,7 @@ require('bookmarks').setup {
     map("n","mt",bm.toggle_virt_text) -- toggle inline annotation text
     map("n","ms",bm.toggle_scope) -- toggle a project-local scope file
     map("n","tb","<Cmd>Telescope bookmarks list<CR>") -- toggle Telescope bookmarks list
+    map("n", "mL", snacks.BookmarksPicker, { desc = "Open bookmarks picker" }) -- show marked file list using Snacks
     -- map("n","bm","<Cmd>BookmarkScope<CR>") -- add or remove the current directory from the scope
   end
 }
