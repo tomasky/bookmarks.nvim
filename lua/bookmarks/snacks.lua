@@ -20,7 +20,7 @@ local function get_text(ann)
     return nil
   end
   if ann:sub(1, 1) == "@" and config.keywords[ann:sub(1, 2)] then
-    local icon = trim(config.keywords[ann:sub(1, 2)])
+    local icon = trim(actions.ann_icon(ann))
     local body = trim(ann:sub(3))
     return body == "" and icon or icon .. " " .. body
   end
@@ -59,18 +59,21 @@ local format = function(item, picker)
   if annotation ~= "" then
     text = annotation .. " | " .. text
   end
-  if #text > 50 then
-    text = text:sub(1, 47) .. "..."
-  else
-    text = string.format("%-50s", text)
+
+  local resolve = function(total_width)
+    local max_width = total_width - 2
+    text = vim.api.nvim_strwidth(text) > max_width and (vim.fn.strcharpart(text, 0, max_width - 3) .. "...") or text
+
+    local aligned_text = snacks.picker.util.align(text, max_width, { align = "left" })
+    return { { aligned_text, "SnacksPickerLabel" } }
   end
 
   return {
-    { aligned_path, hl = "SnacksPickerPath" },
+    { aligned_path, "SnacksPickerPath" },
     { ":" },
-    { aligned_line, hl = "Comment" },
+    { aligned_line, "Comment" },
     { " | ", "SnacksPickerDelim" },
-    { text, "SnacksPickerLabel" },
+    { "", "SnacksPickerLabel", resolve = resolve },
   }
 end
 
